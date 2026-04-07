@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { applyFaceState, resolveFaceState } from './characterState.js';
 import { updateSprint, updateHUD, getStamina } from './playerStats.js';
 import { addCollider, removeCollidersInChunk, resolveCollision } from './collision.js';
-import { getHeight, getUphillFactor, applyTerrainToChunk, TERRAIN_SEGS } from './terrain.js';
+import { getHeight, getUphillFactor, isTooSteep, isMountainZone, applyTerrainToChunk, TERRAIN_SEGS } from './terrain.js';
 
 // ── Scene setup ────────────────────────────────────────────────────
 const scene = new THREE.Scene();
@@ -185,6 +185,7 @@ function createGroundChunk(cx, cz) {
     for (let i = 0; i < treeCount; i++) {
         const tx = worldX + (seededRand(treeSeed + i * 17.3) - 0.5) * (CHUNK_SIZE_X - 4);
         const tz = worldZ + (seededRand(treeSeed + i * 31.7) - 0.5) * (CHUNK_SIZE_Z - 4);
+        if (isMountainZone(tx, tz)) continue; // no trees on mountains
         const tree = createTree(tx, tz, treeSeed + i);
         const treeScale = (0.8 + Math.abs(Math.sin(treeSeed + i)) * 0.6) * 2.2;
         addCollider(tx, tz, 0.25 * treeScale + 0.3);
@@ -238,11 +239,12 @@ function createCloud(x, y, z, scale) {
 }
 
 const clouds = [];
-clouds.push(createCloud(-8, 18, -15, 1.5));
-clouds.push(createCloud(6, 22, -20, 1.2));
-clouds.push(createCloud(18, 17, -12, 1.0));
-clouds.push(createCloud(-15, 20, -25, 1.8));
-clouds.push(createCloud(25, 21, -18, 1.3));
+const cloudBaseY = [20, 24, 19, 22, 23]; // height above player
+clouds.push(createCloud(-8, cloudBaseY[0], -15, 1.5));
+clouds.push(createCloud(6, cloudBaseY[1], -20, 1.2));
+clouds.push(createCloud(18, cloudBaseY[2], -12, 1.0));
+clouds.push(createCloud(-15, cloudBaseY[3], -25, 1.8));
+clouds.push(createCloud(25, cloudBaseY[4], -18, 1.3));
 
 // ── Helper: shape builders ─────────────────────────────────────────
 function makeRect(w, h, mat) {
@@ -641,6 +643,12 @@ function update() {
     pd.vx *= moveMult;
     pd.vz *= moveMult;
 
+    // Block movement if slope ahead is too steep
+    if (isTooSteep(player.position.x, player.position.z, pd.vx, pd.vz)) {
+        pd.vx = 0;
+        pd.vz = 0;
+    }
+
     const newX = player.position.x + pd.vx * dt;
     const newZ = player.position.z + pd.vz * dt;
     const resolved = resolveCollision(player.position.x, player.position.z, newX, newZ);
@@ -656,30 +664,31 @@ function update() {
     // Procedural ground
     updateGroundChunks(player.position.x, player.position.z);
 
-    // Camera follow with zoom
+    // Camera follow with zoom, adjusts to player altitude
     CAM_OFFSET.copy(CAM_OFFSET_DEFAULT).multiplyScalar(camZoom);
     const targetCamPos = new THREE.Vector3(
         player.position.x + CAM_OFFSET.x,
-        CAM_OFFSET.y,
+        player.position.y + CAM_OFFSET.y,
         player.position.z + CAM_OFFSET.z
     );
     camera.position.lerp(targetCamPos, 3 * dt);
     camera.lookAt(player.position.x, player.position.y + 4, player.position.z);
 
     // Light follows player
-    dirLight.position.set(player.position.x + 5, 15, player.position.z + 10);
-    dirLight.target.position.set(player.position.x, 0, player.position.z);
+    dirLight.position.set(player.position.x + 5, player.position.y + 17, player.position.z + 10);
+    dirLight.target.position.set(player.position.x, player.position.y, player.position.z);
     dirLight.target.updateMatrixWorld();
 
     // Day/night cycle
     updateDayNight(time);
 
-    // Clouds drift
+    // Clouds drift, stay high relative to player altitude
     clouds.forEach((c, i) => {
         c.position.x += (0.15 + i * 0.05) * dt;
         if (c.position.x > player.position.x + 40) {
             c.position.x = player.position.x - 40;
         }
+        c.position.y = player.position.y + cloudBaseY[i];
     });
 
     // Render
