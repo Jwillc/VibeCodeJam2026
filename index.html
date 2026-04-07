@@ -3,126 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stick Shooter</title>
+    <title>Stick World</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { overflow: hidden; background: #000; }
         canvas { display: block; }
-        #hud {
-            position: absolute;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            pointer-events: none;
-            font-family: 'Courier New', monospace;
-            font-weight: bold;
-        }
-        .hud-item {
-            position: absolute;
-            color: #fff;
-            text-shadow: 2px 2px 0 #000;
-        }
-        #health-container {
-            top: 18px; left: 18px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        #heart {
-            width: 28px; height: 26px;
-            image-rendering: pixelated;
-        }
-        #health-bar-bg {
-            width: 140px; height: 22px;
-            background: #1a1a2e;
-            border-radius: 4px;
-            border: 2px solid #333;
-            overflow: hidden;
-        }
-        #health-bar {
-            width: 100%;
-            height: 100%;
-            background: #fff;
-            transition: width 0.3s;
-        }
-        #score-container {
-            top: 12px; right: 18px;
-            background: #1a1a2e;
-            border: 2px solid #444;
-            border-radius: 6px;
-            padding: 4px 14px;
-            text-align: center;
-        }
-        #score-label {
-            font-size: 13px;
-            letter-spacing: 3px;
-            color: #ccc;
-        }
-        #score-value {
-            font-size: 28px;
-            letter-spacing: 4px;
-            color: #fff;
-        }
-        #ammo-container {
-            bottom: 18px; left: 18px;
-            background: #1a1a2e;
-            border: 2px solid #444;
-            border-radius: 6px;
-            padding: 4px 14px;
-            text-align: center;
-        }
-        #ammo-label {
-            font-size: 13px;
-            letter-spacing: 3px;
-            color: #ccc;
-        }
-        #ammo-value {
-            font-size: 28px;
-            letter-spacing: 2px;
-            color: #fff;
-        }
-        #gun-icon-container {
-            bottom: 18px; right: 18px;
-            background: #1a1a2e;
-            border: 2px solid #444;
-            border-radius: 6px;
-            padding: 8px 12px;
-        }
-        #gun-icon {
-            width: 36px; height: 28px;
-            image-rendering: pixelated;
-        }
         #controls-hint {
-            bottom: 80px;
+            position: absolute;
+            bottom: 20px;
             left: 50%;
             transform: translateX(-50%);
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
             font-size: 12px;
             color: rgba(255,255,255,0.4);
-            text-align: center;
+            text-shadow: 1px 1px 0 #000;
+            pointer-events: none;
             white-space: nowrap;
         }
     </style>
 </head>
 <body>
-    <div id="hud">
-        <div id="health-container" class="hud-item">
-            <canvas id="heart" width="28" height="26"></canvas>
-            <div id="health-bar-bg">
-                <div id="health-bar"></div>
-            </div>
-        </div>
-        <div id="score-container" class="hud-item">
-            <div id="score-label">SCORE</div>
-            <div id="score-value">0000</div>
-        </div>
-        <div id="ammo-container" class="hud-item">
-            <div id="ammo-label">AMMO</div>
-            <div id="ammo-value">45</div>
-        </div>
-        <div id="gun-icon-container" class="hud-item">
-            <canvas id="gun-icon" width="36" height="28"></canvas>
-        </div>
-        <div id="controls-hint" class="hud-item">A/D Move &bull; W/S Forward/Back &bull; LMB Shoot</div>
-    </div>
+    <div id="controls-hint">A/D Move &bull; W/S Forward/Back</div>
 
     <script type="importmap">
     {

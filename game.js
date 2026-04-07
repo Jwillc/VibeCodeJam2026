@@ -1,56 +1,5 @@
 import * as THREE from 'three';
-
-// ── Pixel art helpers for HUD ──────────────────────────────────────
-function drawPixelHeart() {
-    const c = document.getElementById('heart');
-    const ctx = c.getContext('2d');
-    const s = 2;
-    const heart = [
-        "  ##  ##  ",
-        " ########",
-        " ########",
-        " ########",
-        "  ###### ",
-        "  ###### ",
-        "   ####  ",
-        "   ####  ",
-        "    ##   ",
-    ];
-    ctx.fillStyle = '#e0245e';
-    heart.forEach((row, y) => {
-        for (let x = 0; x < row.length; x++) {
-            if (row[x] === '#') ctx.fillRect(x * s + 2, y * s + 2, s, s);
-        }
-    });
-}
-
-function drawPixelGun() {
-    const c = document.getElementById('gun-icon');
-    const ctx = c.getContext('2d');
-    const s = 2;
-    const gun = [
-        "      ####    ",
-        "   #########  ",
-        "  ###########",
-        "  ###########",
-        "  ########## ",
-        "  #########  ",
-        "   ##  ###   ",
-        "   ##  ##    ",
-        "   ##        ",
-        "  ###        ",
-        "  ##         ",
-    ];
-    ctx.fillStyle = '#ffffff';
-    gun.forEach((row, y) => {
-        for (let x = 0; x < row.length; x++) {
-            if (row[x] === '#') ctx.fillRect(x * s, y * s, s, s);
-        }
-    });
-}
-
-drawPixelHeart();
-drawPixelGun();
+import { applyFaceState, resolveFaceState } from './characterState.js';
 
 // ── Scene setup ────────────────────────────────────────────────────
 const scene = new THREE.Scene();
@@ -58,7 +7,7 @@ scene.background = new THREE.Color(0xd4d4d8);
 scene.fog = new THREE.Fog(0xd4d4d8, 30, 80);
 
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 200);
-const CAM_OFFSET = new THREE.Vector3(0, 6, 18); // offset from player
+const CAM_OFFSET = new THREE.Vector3(0, 6, 18);
 camera.position.set(0, 6, 18);
 camera.lookAt(0, 2, 0);
 
@@ -69,25 +18,25 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.prepend(renderer.domElement);
 
-// ── Vignette (screen-space overlay) ────────────────────────────────
+// ── Vignette ───────────────────────────────────────────────────────
 const vignetteScene = new THREE.Scene();
 const vignetteCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-const vignetteMat = new THREE.ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    depthTest: false,
-    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
-    fragmentShader: `
-        varying vec2 vUv;
-        void main(){
-            vec2 center = vUv - 0.5;
-            float dist = length(center) * 1.5;
-            float vig = smoothstep(0.2, 1.1, dist);
-            gl_FragColor = vec4(0.0, 0.0, 0.0, vig * 0.7);
-        }
-    `
-});
-const vignetteQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), vignetteMat);
+const vignetteQuad = new THREE.Mesh(
+    new THREE.PlaneGeometry(2, 2),
+    new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, depthTest: false,
+        vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+        fragmentShader: `
+            varying vec2 vUv;
+            void main(){
+                vec2 center = vUv - 0.5;
+                float dist = length(center) * 1.5;
+                float vig = smoothstep(0.2, 1.1, dist);
+                gl_FragColor = vec4(0.0, 0.0, 0.0, vig * 0.7);
+            }
+        `
+    })
+);
 vignetteScene.add(vignetteQuad);
 
 // ── Lighting ───────────────────────────────────────────────────────
@@ -108,22 +57,81 @@ scene.add(dirLight);
 const darkMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8 });
 const groundMat = new THREE.MeshStandardMaterial({ color: 0x7a8a5a, roughness: 0.9 });
 const groundSideMat = new THREE.MeshStandardMaterial({ color: 0x5a6a4a, roughness: 0.9 });
-const groundBorderMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.7 });
 const cloudMat = new THREE.MeshBasicMaterial({ color: 0xb0b0b8 });
 const cloudDarkMat = new THREE.MeshBasicMaterial({ color: 0x8a8a92 });
-const bulletMat = new THREE.MeshBasicMaterial({ color: 0xffcc00 });
-const enemyBulletMat = new THREE.MeshBasicMaterial({ color: 0xff4444 });
-const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 });
-const headFillMat = new THREE.MeshStandardMaterial({ color: 0xc0c0c4, roughness: 0.5 });
+const dirtSpotMat = new THREE.MeshStandardMaterial({ color: 0x5a6a4a, roughness: 1 });
+const trunkMat = new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.9 });
+const leavesMat = new THREE.MeshStandardMaterial({ color: 0x4a6a2a, roughness: 0.8 });
+const leavesDarkMat = new THREE.MeshStandardMaterial({ color: 0x3a5a1a, roughness: 0.8 });
 
-// ── Procedural Ground ──────────────────────────────────────────────
+// Character materials (wooden samurai palette)
+const bodyBrownMat = new THREE.MeshBasicMaterial({ color: 0x8B6844 });       // dark brown body
+const bodyBrownDarkMat = new THREE.MeshBasicMaterial({ color: 0x6B4C30 });   // darker brown edges
+const limbTanMat = new THREE.MeshBasicMaterial({ color: 0xC4A872 });         // tan limbs
+const limbTanDarkMat = new THREE.MeshBasicMaterial({ color: 0xA08850 });     // darker tan joints
+const faceMaskMat = new THREE.MeshBasicMaterial({ color: 0xC4A872 });        // tan face (matches skin)
+const outlineMat = new THREE.MeshBasicMaterial({ color: 0x2A1A0A });         // dark outline
+const bootMat = new THREE.MeshBasicMaterial({ color: 0x6B4830 });            // boot color
+
+// ── Tree creation ──────────────────────────────────────────────────
+function createTree(x, z, seed) {
+    const group = new THREE.Group();
+    const s = 0.8 + Math.abs(Math.sin(seed)) * 0.6; // size variation
+
+    // Trunk
+    const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.15 * s, 0.25 * s, 2.5 * s, 8),
+        trunkMat
+    );
+    trunk.position.y = 1.25 * s;
+    trunk.castShadow = true;
+    group.add(trunk);
+
+    // Foliage layers (stacked spheres/cones for a stylized look)
+    const foliageBottom = new THREE.Mesh(
+        new THREE.ConeGeometry(1.4 * s, 2.0 * s, 8),
+        leavesDarkMat
+    );
+    foliageBottom.position.y = 2.8 * s;
+    foliageBottom.castShadow = true;
+    group.add(foliageBottom);
+
+    const foliageMid = new THREE.Mesh(
+        new THREE.ConeGeometry(1.1 * s, 1.6 * s, 8),
+        leavesMat
+    );
+    foliageMid.position.y = 3.6 * s;
+    foliageMid.castShadow = true;
+    group.add(foliageMid);
+
+    const foliageTop = new THREE.Mesh(
+        new THREE.ConeGeometry(0.7 * s, 1.2 * s, 7),
+        leavesDarkMat
+    );
+    foliageTop.position.y = 4.3 * s;
+    foliageTop.castShadow = true;
+    group.add(foliageTop);
+
+    group.position.set(x, GROUND_Y, z);
+    // Slight random rotation for variety
+    group.rotation.y = seed * 1.7;
+    scene.add(group);
+    return group;
+}
+
+// ── Procedural Ground with Trees ───────────────────────────────────
 const GROUND_Y = -2;
 const CHUNK_SIZE_X = 30;
 const CHUNK_SIZE_Z = 30;
-const groundChunks = new Map(); // key: "cx,cz" -> group
-const dirtSpotMat = new THREE.MeshStandardMaterial({ color: 0x5a6a4a, roughness: 1 });
+const groundChunks = new Map();
 
 function chunkKey(cx, cz) { return cx + ',' + cz; }
+
+// Seeded pseudo-random
+function seededRand(seed) {
+    const r = Math.sin(seed) * 43758.5453;
+    return r - Math.floor(r);
+}
 
 function createGroundChunk(cx, cz) {
     const key = chunkKey(cx, cz);
@@ -133,7 +141,7 @@ function createGroundChunk(cx, cz) {
     const worldX = cx * CHUNK_SIZE_X;
     const worldZ = cz * CHUNK_SIZE_Z;
 
-    // Top surface
+    // Ground surface
     const top = new THREE.Mesh(
         new THREE.BoxGeometry(CHUNK_SIZE_X, 1, CHUNK_SIZE_Z),
         [groundSideMat, groundSideMat, groundMat, groundSideMat, groundSideMat, groundSideMat]
@@ -142,15 +150,13 @@ function createGroundChunk(cx, cz) {
     top.receiveShadow = true;
     group.add(top);
 
-    // Seeded random dirt spots
+    // Dirt spots
     const seed = cx * 7919 + cz * 104729;
     for (let i = 0; i < 12; i++) {
-        const r = Math.sin(seed + i * 13.37) * 10000;
-        const rx = (r - Math.floor(r)) - 0.5;
-        const r2 = Math.sin(seed + i * 27.53) * 10000;
-        const rz = (r2 - Math.floor(r2)) - 0.5;
+        const rx = seededRand(seed + i * 13.37) - 0.5;
+        const rz = seededRand(seed + i * 27.53) - 0.5;
         const spot = new THREE.Mesh(
-            new THREE.CircleGeometry(0.08 + Math.abs(Math.sin(seed + i)) * 0.12, 6),
+            new THREE.CircleGeometry(0.08 + seededRand(seed + i * 7.1) * 0.12, 6),
             dirtSpotMat
         );
         spot.rotation.x = -Math.PI / 2;
@@ -163,7 +169,19 @@ function createGroundChunk(cx, cz) {
     }
 
     scene.add(group);
-    groundChunks.set(key, group);
+
+    // Trees for this chunk
+    const treeSeed = cx * 3571 + cz * 8923;
+    const treeCount = 2 + Math.floor(seededRand(treeSeed) * 4); // 2-5 trees per chunk
+    const trees = [];
+    for (let i = 0; i < treeCount; i++) {
+        const tx = worldX + (seededRand(treeSeed + i * 17.3) - 0.5) * (CHUNK_SIZE_X - 4);
+        const tz = worldZ + (seededRand(treeSeed + i * 31.7) - 0.5) * (CHUNK_SIZE_Z - 4);
+        const tree = createTree(tx, tz, treeSeed + i);
+        trees.push(tree);
+    }
+
+    groundChunks.set(key, { ground: group, trees });
 }
 
 function updateGroundChunks(px, pz) {
@@ -171,57 +189,57 @@ function updateGroundChunks(px, pz) {
     const pcz = Math.round(pz / CHUNK_SIZE_Z);
     const radius = 3;
 
-    // Create nearby chunks
     for (let dx = -radius; dx <= radius; dx++) {
         for (let dz = -radius; dz <= radius; dz++) {
             createGroundChunk(pcx + dx, pcz + dz);
         }
     }
 
-    // Remove far chunks
-    for (const [key, group] of groundChunks) {
+    for (const [key, chunk] of groundChunks) {
         const [cx, cz] = key.split(',').map(Number);
         if (Math.abs(cx - pcx) > radius + 1 || Math.abs(cz - pcz) > radius + 1) {
-            scene.remove(group);
+            scene.remove(chunk.ground);
+            chunk.trees.forEach(t => scene.remove(t));
             groundChunks.delete(key);
         }
     }
 }
 
-// Initial chunks
 updateGroundChunks(0, 5);
 
 // ── Cloud creation ─────────────────────────────────────────────────
 function createCloud(x, y, z, scale) {
     const group = new THREE.Group();
-
     const addPuff = (px, py, r, mat) => {
         const puff = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 8), mat);
         puff.position.set(px, py, 0);
         group.add(puff);
     };
-
     addPuff(-0.6 * scale, 0, 0.75 * scale, cloudDarkMat);
     addPuff(0, 0.15 * scale, 0.85 * scale, cloudDarkMat);
     addPuff(0.65 * scale, -0.05 * scale, 0.7 * scale, cloudDarkMat);
     addPuff(-0.55 * scale, 0.05, 0.62 * scale, cloudMat);
     addPuff(0.05, 0.2 * scale, 0.72 * scale, cloudMat);
     addPuff(0.6 * scale, 0, 0.58 * scale, cloudMat);
-
     group.position.set(x, y, z);
     scene.add(group);
     return group;
 }
 
 const clouds = [];
-clouds.push(createCloud(-8, 8, -15, 1.5));
-clouds.push(createCloud(6, 10, -20, 1.2));
-clouds.push(createCloud(18, 7, -12, 1.0));
-clouds.push(createCloud(-15, 9, -25, 1.8));
-clouds.push(createCloud(25, 11, -18, 1.3));
+clouds.push(createCloud(-8, 18, -15, 1.5));
+clouds.push(createCloud(6, 22, -20, 1.2));
+clouds.push(createCloud(18, 17, -12, 1.0));
+clouds.push(createCloud(-15, 20, -25, 1.8));
+clouds.push(createCloud(25, 21, -18, 1.3));
 
-// ── Helper: rounded rectangle shape ────────────────────────────────
-function createRoundedRect(w, h, r) {
+// ── Helper: shape builders ─────────────────────────────────────────
+function makeRect(w, h, mat) {
+    return new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+}
+
+// ── Rounded rect shape helper ──────────────────────────────────────
+function makeRoundedRect(w, h, r, mat) {
     const shape = new THREE.Shape();
     const x = -w / 2, y = -h / 2;
     shape.moveTo(x + r, y);
@@ -233,202 +251,197 @@ function createRoundedRect(w, h, r) {
     shape.quadraticCurveTo(x, y + h, x, y + h - r);
     shape.lineTo(x, y + r);
     shape.quadraticCurveTo(x, y, x + r, y);
-    return new THREE.ShapeGeometry(shape);
+    return new THREE.Mesh(new THREE.ShapeGeometry(shape), mat);
 }
 
-function createLimb(length, thickness) {
-    return createRoundedRect(thickness, length, thickness * 0.4);
-}
-
-// ── Stick figure creation ──────────────────────────────────────────
-function createStickFigure(isPlayer) {
+// ── Polished Character creation (flat 2D) ──────────────────────────
+function createSamurai() {
     const group = new THREE.Group();
-    const mat = darkMat;
-    const T = 0.14;
+    const S = 0.75;
 
-    // Head
-    const headRadius = 0.52;
-    const headBorder = new THREE.Mesh(new THREE.CircleGeometry(headRadius + 0.1, 32), mat);
-    headBorder.position.y = 2.55;
-    group.add(headBorder);
+    // ── Body (slim torso) ──
+    // Outline
+    const bodyOut = makeRoundedRect(0.9 * S, 1.55 * S, 0.12 * S, outlineMat);
+    bodyOut.position.set(0, 1.4 * S, 0);
+    group.add(bodyOut);
+    // Fill
+    const bodyFill = makeRoundedRect(0.8 * S, 1.45 * S, 0.1 * S, bodyBrownMat);
+    bodyFill.position.set(0, 1.4 * S, 0.01);
+    group.add(bodyFill);
+    // Chest highlight
+    const chestHL = makeRoundedRect(0.35 * S, 0.6 * S, 0.06 * S, bodyBrownDarkMat);
+    chestHL.position.set(0, 1.55 * S, 0.02);
+    group.add(chestHL);
+    // Belt line
+    const belt = makeRoundedRect(0.78 * S, 0.1 * S, 0.04 * S, limbTanDarkMat);
+    belt.position.set(0, 0.72 * S, 0.02);
+    group.add(belt);
 
-    const headFill = new THREE.Mesh(new THREE.CircleGeometry(headRadius - 0.02, 32), headFillMat);
-    headFill.position.set(0, 2.55, 0.01);
+    // ── Shoulder caps (blend arms into body) ──
+    const shoulderCapL = new THREE.Mesh(new THREE.CircleGeometry(0.16 * S, 12), bodyBrownMat);
+    shoulderCapL.position.set(-0.42 * S, 2.0 * S, 0.015);
+    group.add(shoulderCapL);
+    const shoulderCapR = new THREE.Mesh(new THREE.CircleGeometry(0.16 * S, 12), bodyBrownMat);
+    shoulderCapR.position.set(0.42 * S, 2.0 * S, 0.015);
+    group.add(shoulderCapR);
+
+    // ── Neck ──
+    const neck = makeRoundedRect(0.35 * S, 0.2 * S, 0.06 * S, limbTanMat);
+    neck.position.set(0, 2.22 * S, 0.01);
+    group.add(neck);
+
+    // ── Head (rounded) ──
+    const headOut = makeRoundedRect(0.72 * S, 0.7 * S, 0.2 * S, outlineMat);
+    headOut.position.set(0, 2.7 * S, 0);
+    group.add(headOut);
+    const headFill = makeRoundedRect(0.62 * S, 0.6 * S, 0.18 * S, limbTanMat);
+    headFill.position.set(0, 2.7 * S, 0.01);
     group.add(headFill);
 
-    // Side face (single eye — default profile view)
+    // ── Side face (profile — single eye) ──
     const sideface = new THREE.Group();
-    const eyeOuter = new THREE.Mesh(new THREE.RingGeometry(0.1, 0.2, 16), mat);
-    eyeOuter.position.set(0.1, 2.6, 0.02);
-    sideface.add(eyeOuter);
-    const eyeInner = new THREE.Mesh(new THREE.CircleGeometry(0.07, 10), mat);
-    eyeInner.position.set(0.13, 2.62, 0.03);
-    sideface.add(eyeInner);
+    // Eye
+    const eyeSide = new THREE.Mesh(new THREE.CircleGeometry(0.06 * S, 10), outlineMat);
+    eyeSide.position.set(0.14 * S, 2.68 * S, 0.03);
+    sideface.add(eyeSide);
     group.add(sideface);
 
-    // Front face (two eyes — shown when walking toward camera)
+    // ── Front face (two eyes) ──
     const frontface = new THREE.Group();
     // Left eye
-    const fEyeOuterL = new THREE.Mesh(new THREE.RingGeometry(0.08, 0.17, 16), mat);
-    fEyeOuterL.position.set(-0.15, 2.6, 0.02);
-    frontface.add(fEyeOuterL);
-    const fEyeInnerL = new THREE.Mesh(new THREE.CircleGeometry(0.06, 10), mat);
-    fEyeInnerL.position.set(-0.15, 2.62, 0.03);
-    frontface.add(fEyeInnerL);
+    const eyeFL = new THREE.Mesh(new THREE.CircleGeometry(0.055 * S, 10), outlineMat);
+    eyeFL.position.set(-0.1 * S, 2.68 * S, 0.03);
+    frontface.add(eyeFL);
     // Right eye
-    const fEyeOuterR = new THREE.Mesh(new THREE.RingGeometry(0.08, 0.17, 16), mat);
-    fEyeOuterR.position.set(0.15, 2.6, 0.02);
-    frontface.add(fEyeOuterR);
-    const fEyeInnerR = new THREE.Mesh(new THREE.CircleGeometry(0.06, 10), mat);
-    fEyeInnerR.position.set(0.15, 2.62, 0.03);
-    frontface.add(fEyeInnerR);
+    const eyeFR = new THREE.Mesh(new THREE.CircleGeometry(0.055 * S, 10), outlineMat);
+    eyeFR.position.set(0.1 * S, 2.68 * S, 0.03);
+    frontface.add(eyeFR);
     frontface.visible = false;
     group.add(frontface);
 
-    // Neck
-    const neck = new THREE.Mesh(createLimb(0.25, T), mat);
-    neck.position.set(0, 2.15, 0);
-    group.add(neck);
-
-    // Torso
-    const torso = new THREE.Mesh(createLimb(1.1, T + 0.02), mat);
-    torso.position.y = 1.45;
-    group.add(torso);
+    // ── Arms ──
+    const shoulderY = 2.0 * S;
 
     // Back arm
-    const shoulderY = 1.85;
     const upperArmBack = new THREE.Group();
-    const uabMesh = new THREE.Mesh(createLimb(0.55, T), mat);
-    uabMesh.position.y = -0.25;
-    upperArmBack.add(uabMesh);
-    upperArmBack.position.set(-0.05, shoulderY, -0.02);
-    upperArmBack.rotation.z = -0.8;
+    const uabOut = makeRoundedRect(0.22 * S, 0.52 * S, 0.07 * S, outlineMat);
+    uabOut.position.y = -0.24 * S;
+    upperArmBack.add(uabOut);
+    const uabFill = makeRoundedRect(0.16 * S, 0.46 * S, 0.05 * S, limbTanMat);
+    uabFill.position.set(0, -0.24 * S, 0.01);
+    upperArmBack.add(uabFill);
+    upperArmBack.position.set(-0.48 * S, shoulderY, -0.02);
+    upperArmBack.rotation.z = -0.1;
     group.add(upperArmBack);
 
     const forearmBack = new THREE.Group();
-    const fabMesh = new THREE.Mesh(createLimb(0.5, T - 0.02), mat);
-    fabMesh.position.y = -0.22;
-    forearmBack.add(fabMesh);
-    forearmBack.position.set(0, -0.5, 0);
-    forearmBack.rotation.z = 0.6;
+    const fabOut = makeRoundedRect(0.2 * S, 0.48 * S, 0.06 * S, outlineMat);
+    fabOut.position.y = -0.22 * S;
+    forearmBack.add(fabOut);
+    const fabFill = makeRoundedRect(0.14 * S, 0.42 * S, 0.04 * S, limbTanDarkMat);
+    fabFill.position.set(0, -0.22 * S, 0.01);
+    forearmBack.add(fabFill);
+    // Hand
+    const handB = new THREE.Mesh(new THREE.CircleGeometry(0.07 * S, 8), limbTanMat);
+    handB.position.set(0, -0.46 * S, 0.01);
+    forearmBack.add(handB);
+    forearmBack.position.set(0, -0.48 * S, 0);
+    forearmBack.rotation.z = 0.1;
     upperArmBack.add(forearmBack);
 
-    // Front arm (gun arm)
+    // Front arm
     const upperArmFront = new THREE.Group();
-    const uafMesh = new THREE.Mesh(createLimb(0.55, T), mat);
-    uafMesh.position.y = -0.25;
-    upperArmFront.add(uafMesh);
-    upperArmFront.position.set(0.05, shoulderY, 0.04);
-    upperArmFront.rotation.z = Math.PI / 2 - 0.15;
+    const uafOut = makeRoundedRect(0.22 * S, 0.52 * S, 0.07 * S, outlineMat);
+    uafOut.position.y = -0.24 * S;
+    upperArmFront.add(uafOut);
+    const uafFill = makeRoundedRect(0.16 * S, 0.46 * S, 0.05 * S, limbTanMat);
+    uafFill.position.set(0, -0.24 * S, 0.01);
+    upperArmFront.add(uafFill);
+    upperArmFront.position.set(0.48 * S, shoulderY, 0.04);
+    upperArmFront.rotation.z = 0.1;
     group.add(upperArmFront);
 
     const forearmFront = new THREE.Group();
-    const fafMesh = new THREE.Mesh(createLimb(0.45, T - 0.02), mat);
-    fafMesh.position.y = -0.2;
-    forearmFront.add(fafMesh);
-    forearmFront.position.set(0, -0.5, 0);
-    forearmFront.rotation.z = -0.05;
+    const fafOut = makeRoundedRect(0.2 * S, 0.48 * S, 0.06 * S, outlineMat);
+    fafOut.position.y = -0.22 * S;
+    forearmFront.add(fafOut);
+    const fafFill = makeRoundedRect(0.14 * S, 0.42 * S, 0.04 * S, limbTanDarkMat);
+    fafFill.position.set(0, -0.22 * S, 0.01);
+    forearmFront.add(fafFill);
+    const handF = new THREE.Mesh(new THREE.CircleGeometry(0.07 * S, 8), limbTanMat);
+    handF.position.set(0, -0.46 * S, 0.01);
+    forearmFront.add(handF);
+    forearmFront.position.set(0, -0.48 * S, 0);
+    forearmFront.rotation.z = -0.1;
     upperArmFront.add(forearmFront);
 
-    // Gun
-    const gunGroup = new THREE.Group();
-    const receiver = new THREE.Mesh(createRoundedRect(0.55, 0.22, 0.04), mat);
-    gunGroup.add(receiver);
-    const barrel = new THREE.Mesh(createRoundedRect(0.5, 0.1, 0.02), mat);
-    barrel.position.set(0.45, 0.05, 0);
-    gunGroup.add(barrel);
-    const muzzle = new THREE.Mesh(new THREE.PlaneGeometry(0.08, 0.16), mat);
-    muzzle.position.set(0.72, 0.05, 0);
-    gunGroup.add(muzzle);
-    const grip = new THREE.Mesh(createRoundedRect(0.12, 0.32, 0.03), mat);
-    grip.position.set(-0.08, -0.22, 0);
-    grip.rotation.z = 0.2;
-    gunGroup.add(grip);
-    const guardShape = new THREE.Shape();
-    guardShape.moveTo(0.05, -0.05);
-    guardShape.lineTo(0.18, -0.05);
-    guardShape.lineTo(0.18, -0.18);
-    guardShape.quadraticCurveTo(0.18, -0.22, 0.14, -0.22);
-    guardShape.lineTo(0.09, -0.22);
-    guardShape.quadraticCurveTo(0.05, -0.22, 0.05, -0.18);
-    guardShape.lineTo(0.05, -0.05);
-    const guard = new THREE.Mesh(new THREE.ShapeGeometry(guardShape), mat);
-    gunGroup.add(guard);
-    const mag = new THREE.Mesh(createRoundedRect(0.1, 0.2, 0.02), mat);
-    mag.position.set(0.12, -0.25, 0);
-    gunGroup.add(mag);
-    const sight = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.1), mat);
-    sight.position.set(-0.2, 0.15, 0);
-    gunGroup.add(sight);
-    gunGroup.position.set(0, -0.45, 0.01);
-    gunGroup.rotation.z = -Math.PI / 2 + 0.1;
-    forearmFront.add(gunGroup);
+    // ── Legs ──
+    const hipY = 0.68 * S;
+    const hipSpread = 0.2 * S;
 
-    // Legs
-    const hipY = 0.9;
-    const hipSpread = 0.12;
-
+    // Left leg
     const upperLegL = new THREE.Group();
-    const ullMesh = new THREE.Mesh(createLimb(0.65, T), mat);
-    ullMesh.position.y = -0.3;
-    upperLegL.add(ullMesh);
+    const ullOut = makeRoundedRect(0.22 * S, 0.55 * S, 0.07 * S, outlineMat);
+    ullOut.position.y = -0.26 * S;
+    upperLegL.add(ullOut);
+    const ullFill = makeRoundedRect(0.16 * S, 0.49 * S, 0.05 * S, limbTanMat);
+    ullFill.position.set(0, -0.26 * S, 0.01);
+    upperLegL.add(ullFill);
     upperLegL.position.set(-hipSpread, hipY, 0);
-    upperLegL.rotation.z = 0.12;
     group.add(upperLegL);
 
     const lowerLegL = new THREE.Group();
-    const lllMesh = new THREE.Mesh(createLimb(0.6, T - 0.02), mat);
-    lllMesh.position.y = -0.28;
-    lowerLegL.add(lllMesh);
-    lowerLegL.position.set(0, -0.6, 0);
-    lowerLegL.rotation.z = -0.12;
+    const lllOut = makeRoundedRect(0.2 * S, 0.5 * S, 0.06 * S, outlineMat);
+    lllOut.position.y = -0.23 * S;
+    lowerLegL.add(lllOut);
+    const lllFill = makeRoundedRect(0.14 * S, 0.44 * S, 0.04 * S, limbTanDarkMat);
+    lllFill.position.set(0, -0.23 * S, 0.01);
+    lowerLegL.add(lllFill);
+    // Boot
+    const bootLOut = makeRoundedRect(0.28 * S, 0.14 * S, 0.05 * S, outlineMat);
+    bootLOut.position.set(0.03 * S, -0.5 * S, 0);
+    lowerLegL.add(bootLOut);
+    const bootLFill = makeRoundedRect(0.22 * S, 0.1 * S, 0.04 * S, bootMat);
+    bootLFill.position.set(0.03 * S, -0.5 * S, 0.01);
+    lowerLegL.add(bootLFill);
+    lowerLegL.position.set(0, -0.52 * S, 0);
     upperLegL.add(lowerLegL);
 
-    const leftFoot = new THREE.Mesh(createRoundedRect(0.32, 0.1, 0.04), mat);
-    leftFoot.position.set(0.06, -0.56, 0);
-    lowerLegL.add(leftFoot);
-
+    // Right leg
     const upperLegR = new THREE.Group();
-    const ulrMesh = new THREE.Mesh(createLimb(0.65, T), mat);
-    ulrMesh.position.y = -0.3;
-    upperLegR.add(ulrMesh);
+    const ulrOut = makeRoundedRect(0.22 * S, 0.55 * S, 0.07 * S, outlineMat);
+    ulrOut.position.y = -0.26 * S;
+    upperLegR.add(ulrOut);
+    const ulrFill = makeRoundedRect(0.16 * S, 0.49 * S, 0.05 * S, limbTanMat);
+    ulrFill.position.set(0, -0.26 * S, 0.01);
+    upperLegR.add(ulrFill);
     upperLegR.position.set(hipSpread, hipY, 0.01);
-    upperLegR.rotation.z = -0.12;
     group.add(upperLegR);
 
     const lowerLegR = new THREE.Group();
-    const llrMesh = new THREE.Mesh(createLimb(0.6, T - 0.02), mat);
-    llrMesh.position.y = -0.28;
-    lowerLegR.add(llrMesh);
-    lowerLegR.position.set(0, -0.6, 0);
-    lowerLegR.rotation.z = 0.12;
+    const llrOut = makeRoundedRect(0.2 * S, 0.5 * S, 0.06 * S, outlineMat);
+    llrOut.position.y = -0.23 * S;
+    lowerLegR.add(llrOut);
+    const llrFill = makeRoundedRect(0.14 * S, 0.44 * S, 0.04 * S, limbTanDarkMat);
+    llrFill.position.set(0, -0.23 * S, 0.01);
+    lowerLegR.add(llrFill);
+    const bootROut = makeRoundedRect(0.28 * S, 0.14 * S, 0.05 * S, outlineMat);
+    bootROut.position.set(0.03 * S, -0.5 * S, 0);
+    lowerLegR.add(bootROut);
+    const bootRFill = makeRoundedRect(0.22 * S, 0.1 * S, 0.04 * S, bootMat);
+    bootRFill.position.set(0.03 * S, -0.5 * S, 0.01);
+    lowerLegR.add(bootRFill);
+    lowerLegR.position.set(0, -0.52 * S, 0);
     upperLegR.add(lowerLegR);
 
-    const rightFoot = new THREE.Mesh(createRoundedRect(0.32, 0.1, 0.04), mat);
-    rightFoot.position.set(0.06, -0.56, 0);
-    lowerLegR.add(rightFoot);
-
     group.userData = {
-        type: isPlayer ? 'player' : 'enemy',
-        vx: 0,
-        vy: 0,
-        vz: 0,
-        onGround: false,
-        hp: isPlayer ? 100 : 30,
-        maxHp: isPlayer ? 100 : 30,
+        vx: 0, vz: 0,
         facing: 1,
-        shootCooldown: 0,
-        upperArmBack,
-        forearmBack,
-        upperArmFront,
-        forearmFront,
-        upperLegL,
-        lowerLegL,
-        upperLegR,
-        lowerLegR,
-        gunGroup,
-        sideface,
-        frontface,
+        upperArmBack, forearmBack,
+        upperArmFront, forearmFront,
+        upperLegL, lowerLegL,
+        upperLegR, lowerLegR,
+        sideface, frontface,
     };
 
     scene.add(group);
@@ -436,130 +449,76 @@ function createStickFigure(isPlayer) {
 }
 
 // ── Player ─────────────────────────────────────────────────────────
-const player = createStickFigure(true);
+const player = createSamurai();
 player.position.set(0, GROUND_Y, 5);
 
-// ── Enemies ────────────────────────────────────────────────────────
-const enemies = [];
-const bullets = [];
-const enemyBullets = [];
-
-function spawnEnemy() {
-    const enemy = createStickFigure(false);
-    const side = Math.random() < 0.5 ? -1 : 1;
-    const spawnX = player.position.x + side * 18;
-    const spawnZ = player.position.z + (Math.random() - 0.5) * 10;
-
-    enemy.position.set(spawnX, GROUND_Y, spawnZ);
-    enemy.userData.facing = -side;
-    enemy.userData.shootCooldown = 1 + Math.random() * 2;
-    enemies.push(enemy);
-}
-
-for (let i = 0; i < 3; i++) spawnEnemy();
+// Blob shadow under the player (flat planes don't cast real shadows well)
+const shadowTex = (() => {
+    const size = 64;
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+    gradient.addColorStop(0, 'rgba(0,0,0,0.45)');
+    gradient.addColorStop(0.6, 'rgba(0,0,0,0.2)');
+    gradient.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+    return new THREE.CanvasTexture(canvas);
+})();
+const playerShadow = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.2, 1.4),
+    new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false })
+);
+playerShadow.rotation.x = -Math.PI / 2;
+playerShadow.position.set(0, GROUND_Y + 0.02, 0);
+scene.add(playerShadow);
 
 // ── Input ──────────────────────────────────────────────────────────
 const keys = {};
-let mouseDown = false;
 window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
-window.addEventListener('mousedown', e => { if (e.button === 0) mouseDown = true; });
-window.addEventListener('mouseup', e => { if (e.button === 0) mouseDown = false; });
-// Prevent right-click context menu on canvas
-renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
 
-// ── Game state ─────────────────────────────────────────────────────
-let score = 0;
-let ammo = 45;
-let playerShootCooldown = 0;
-let spawnTimer = 3;
 const PLAYER_SPEED = 6;
 const PLAYER_SPEED_Z = 4;
-const BULLET_SPEED = 18;
 
-// ── HUD update ─────────────────────────────────────────────────────
-function updateHUD() {
-    const hpPct = Math.max(0, player.userData.hp / player.userData.maxHp * 100);
-    document.getElementById('health-bar').style.width = hpPct + '%';
-    document.getElementById('score-value').textContent = String(score).padStart(4, '0');
-    document.getElementById('ammo-value').textContent = ammo;
-}
-
-// ── Bullet creation ────────────────────────────────────────────────
-function shootBullet(x, y, z, dir, isEnemy) {
-    const bullet = new THREE.Mesh(
-        new THREE.SphereGeometry(0.08, 6, 4),
-        isEnemy ? enemyBulletMat : bulletMat
-    );
-    bullet.position.set(x, y, z);
-    bullet.userData = { vx: dir * BULLET_SPEED, isEnemy, life: 3 };
-    scene.add(bullet);
-    if (isEnemy) enemyBullets.push(bullet);
-    else bullets.push(bullet);
-}
-
-// ── Animate stick figure ───────────────────────────────────────────
-function animateStickFigure(fig, time) {
+// ── Animate samurai ────────────────────────────────────────────────
+function animateSamurai(fig, time) {
     const d = fig.userData;
-    const movingX = Math.abs(d.vx) > 0.5;
-    const movingZ = Math.abs(d.vz || 0) > 0.5;
-    const moving = movingX || movingZ;
-    const t = time * 8;
+    const moving = Math.abs(d.vx) > 0.5 || Math.abs(d.vz || 0) > 0.5;
+    const t = time * 7;
 
     fig.scale.x = d.facing;
 
-    // Toggle face based on movement direction
-    const movingToward = (d.vz || 0) > 0.5;
-    const movingAway = (d.vz || 0) < -0.5;
-    const movingSide = Math.abs(d.vx) > 0.5;
-
-    if ((movingToward || movingAway) && movingSide) {
-        // Diagonal — show single eye on the side they're moving
-        d.sideface.visible = true;
-        d.frontface.visible = false;
-    } else if (movingToward) {
-        // Straight toward camera — two eyes
-        d.sideface.visible = false;
-        d.frontface.visible = true;
-    } else if (movingAway) {
-        // Straight away from camera — no eyes (back of head)
-        d.sideface.visible = false;
-        d.frontface.visible = false;
-    } else {
-        // Side movement or idle — profile with one eye
-        d.sideface.visible = true;
-        d.frontface.visible = false;
-    }
-
-    const gunArmBase = Math.PI / 2 - 0.15;
+    applyFaceState(d, resolveFaceState(d.vx, d.vz || 0));
 
     if (moving) {
         const cycle = Math.sin(t);
         const cycleB = Math.sin(t + Math.PI);
 
-        d.upperLegL.rotation.z = 0.12 + cycle * 0.35;
-        d.lowerLegL.rotation.z = -0.12 + Math.max(0, -cycle) * 0.4;
-        d.upperLegR.rotation.z = -0.12 + cycleB * 0.35;
-        d.lowerLegR.rotation.z = 0.12 + Math.max(0, -cycleB) * 0.4;
+        // Legs swing
+        d.upperLegL.rotation.z = cycle * 0.3;
+        d.lowerLegL.rotation.z = Math.max(0, -cycle) * 0.35;
+        d.upperLegR.rotation.z = cycleB * 0.3;
+        d.lowerLegR.rotation.z = Math.max(0, -cycleB) * 0.35;
 
-        d.upperArmBack.rotation.z = -0.8 + cycleB * 0.2;
-        d.forearmBack.rotation.z = 0.6 + Math.sin(t + 0.5) * 0.15;
-
-        d.upperArmFront.rotation.z = gunArmBase + Math.sin(t) * 0.04;
-        d.forearmFront.rotation.z = -0.05 + Math.sin(t) * 0.03;
+        // Arms swing opposite, staff arm less
+        d.upperArmBack.rotation.z = -0.15 + cycle * 0.15;
+        d.forearmBack.rotation.z = 0.15;
+        d.upperArmFront.rotation.z = 0.15 + cycleB * 0.25;
+        d.forearmFront.rotation.z = -0.15 + Math.max(0, -cycleB) * 0.2;
     } else {
-        const breath = Math.sin(time * 2) * 0.02;
+        const breath = Math.sin(time * 2) * 0.015;
 
-        d.upperLegL.rotation.z = 0.12 + breath;
-        d.lowerLegL.rotation.z = -0.12;
-        d.upperLegR.rotation.z = -0.12 - breath;
-        d.lowerLegR.rotation.z = 0.12;
+        d.upperLegL.rotation.z = breath;
+        d.lowerLegL.rotation.z = 0;
+        d.upperLegR.rotation.z = -breath;
+        d.lowerLegR.rotation.z = 0;
 
-        d.upperArmBack.rotation.z = -0.8 + breath;
-        d.forearmBack.rotation.z = 0.6;
-
-        d.upperArmFront.rotation.z = gunArmBase + breath;
-        d.forearmFront.rotation.z = -0.05;
+        d.upperArmBack.rotation.z = -0.15 + breath;
+        d.forearmBack.rotation.z = 0.15;
+        d.upperArmFront.rotation.z = 0.15 - breath;
+        d.forearmFront.rotation.z = -0.15;
     }
 }
 
@@ -573,36 +532,27 @@ function update() {
 
     const pd = player.userData;
 
-    // ── Player movement ──
+    // Movement
     pd.vx = 0;
     pd.vz = 0;
     if (keys['a'] || keys['arrowleft']) { pd.vx = -PLAYER_SPEED; pd.facing = -1; }
     if (keys['d'] || keys['arrowright']) { pd.vx = PLAYER_SPEED; pd.facing = 1; }
-    // W = away from camera (negative Z), S = toward camera (positive Z)
     if (keys['w'] || keys['arrowup']) { pd.vz = -PLAYER_SPEED_Z; }
     if (keys['s'] || keys['arrowdown']) { pd.vz = PLAYER_SPEED_Z; }
 
-    // Shooting with LMB
-    playerShootCooldown -= dt;
-    if (mouseDown && playerShootCooldown <= 0 && ammo > 0) {
-        const gunTipX = player.position.x + pd.facing * 1.5;
-        const gunTipY = player.position.y + 1.75;
-        shootBullet(gunTipX, gunTipY, player.position.z, pd.facing, false);
-        ammo--;
-        playerShootCooldown = 0.18;
-    }
-
-    // Player stays on ground (no gravity/jump)
     player.position.x += pd.vx * dt;
     player.position.z += pd.vz * dt;
     player.position.y = GROUND_Y;
 
-    animateStickFigure(player, time);
+    animateSamurai(player, time);
 
-    // ── Update procedural ground ──
+    // Update blob shadow
+    playerShadow.position.set(player.position.x, GROUND_Y + 0.02, player.position.z);
+
+    // Procedural ground
     updateGroundChunks(player.position.x, player.position.z);
 
-    // ── Camera follow ──
+    // Camera follow
     const targetCamPos = new THREE.Vector3(
         player.position.x + CAM_OFFSET.x,
         CAM_OFFSET.y,
@@ -611,12 +561,12 @@ function update() {
     camera.position.lerp(targetCamPos, 3 * dt);
     camera.lookAt(player.position.x, 2, player.position.z);
 
-    // Update directional light to follow player
+    // Light follows player
     dirLight.position.set(player.position.x + 5, 15, player.position.z + 10);
     dirLight.target.position.set(player.position.x, 0, player.position.z);
     dirLight.target.updateMatrixWorld();
 
-    // Move clouds slowly
+    // Clouds drift
     clouds.forEach((c, i) => {
         c.position.x += (0.15 + i * 0.05) * dt;
         if (c.position.x > player.position.x + 40) {
@@ -624,129 +574,7 @@ function update() {
         }
     });
 
-    // ── Enemy AI ──
-    spawnTimer -= dt;
-    if (spawnTimer <= 0 && enemies.length < 6) {
-        spawnEnemy();
-        spawnTimer = 2.5 + Math.random() * 2;
-    }
-
-    for (let i = enemies.length - 1; i >= 0; i--) {
-        const enemy = enemies[i];
-        const ed = enemy.userData;
-
-        const dx = player.position.x - enemy.position.x;
-        const dz = player.position.z - enemy.position.z;
-        const dirToPlayer = Math.sign(dx);
-        ed.facing = dirToPlayer;
-
-        if (Math.abs(dx) > 3) {
-            ed.vx = dirToPlayer * 2.5;
-        } else {
-            ed.vx = 0;
-        }
-
-        // Move toward player in Z too
-        if (Math.abs(dz) > 1) {
-            ed.vz = Math.sign(dz) * 1.5;
-        } else {
-            ed.vz = 0;
-        }
-
-        // Shoot at player
-        ed.shootCooldown -= dt;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        if (ed.shootCooldown <= 0 && dist < 14 && Math.abs(dz) < 3) {
-            const gunTipX = enemy.position.x + ed.facing * 1.5;
-            const gunTipY = enemy.position.y + 1.75;
-            shootBullet(gunTipX, gunTipY, enemy.position.z, ed.facing, true);
-            ed.shootCooldown = 1.5 + Math.random() * 1.5;
-        }
-
-        // Movement (no gravity, stay on ground)
-        enemy.position.x += (ed.vx || 0) * dt;
-        enemy.position.z += (ed.vz || 0) * dt;
-        enemy.position.y = GROUND_Y;
-
-        // Remove if too far
-        if (Math.abs(enemy.position.x - player.position.x) > 40) {
-            scene.remove(enemy);
-            enemies.splice(i, 1);
-            continue;
-        }
-
-        animateStickFigure(enemy, time + i);
-
-        if (ed.hp <= 0) {
-            scene.remove(enemy);
-            enemies.splice(i, 1);
-            score += 50;
-            ammo = Math.min(ammo + 10, 99);
-        }
-    }
-
-    // ── Player bullets ──
-    for (let i = bullets.length - 1; i >= 0; i--) {
-        const b = bullets[i];
-        b.position.x += b.userData.vx * dt;
-        b.userData.life -= dt;
-
-        let hit = false;
-        for (let j = enemies.length - 1; j >= 0; j--) {
-            const enemy = enemies[j];
-            const ex = enemy.position.x;
-            const ey = enemy.position.y + 1.2;
-            const ez = enemy.position.z;
-            if (Math.abs(b.position.x - ex) < 0.8 &&
-                Math.abs(b.position.y - ey) < 1.5 &&
-                Math.abs(b.position.z - ez) < 1.5) {
-                enemy.userData.hp -= 15;
-                hit = true;
-                score += 10;
-                break;
-            }
-        }
-
-        if (hit || b.userData.life <= 0) {
-            scene.remove(b);
-            bullets.splice(i, 1);
-        }
-    }
-
-    // ── Enemy bullets ──
-    for (let i = enemyBullets.length - 1; i >= 0; i--) {
-        const b = enemyBullets[i];
-        b.position.x += b.userData.vx * dt;
-        b.userData.life -= dt;
-
-        const px = player.position.x;
-        const py = player.position.y + 1.2;
-        const pz = player.position.z;
-        let hit = false;
-        if (Math.abs(b.position.x - px) < 0.6 &&
-            Math.abs(b.position.y - py) < 1.5 &&
-            Math.abs(b.position.z - pz) < 1.5) {
-            pd.hp -= 10;
-            hit = true;
-        }
-
-        if (hit || b.userData.life <= 0) {
-            scene.remove(b);
-            enemyBullets.splice(i, 1);
-        }
-    }
-
-    // ── Death / respawn ──
-    if (pd.hp <= 0) {
-        pd.hp = pd.maxHp;
-        player.position.set(player.position.x, GROUND_Y, player.position.z);
-        score = Math.max(0, score - 100);
-        ammo = 45;
-    }
-
-    updateHUD();
-
-    // Render scene then vignette on top
+    // Render
     renderer.autoClear = true;
     renderer.render(scene, camera);
     renderer.autoClear = false;
