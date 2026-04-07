@@ -7,7 +7,13 @@ scene.background = new THREE.Color(0x87ceeb);
 scene.fog = new THREE.Fog(0x87ceeb, 60, 150);
 
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 200);
-const CAM_OFFSET = new THREE.Vector3(0, 6, 18);
+const CAM_OFFSET_DEFAULT = new THREE.Vector3(0, 6, 18);
+const CAM_OFFSET = CAM_OFFSET_DEFAULT.clone();
+const CAM_ZOOM_STEPS = 8;
+const CAM_ZOOM_MIN = 0.45;
+const CAM_ZOOM_MAX = 1.0;
+const CAM_ZOOM_STEP = (CAM_ZOOM_MAX - CAM_ZOOM_MIN) / CAM_ZOOM_STEPS;
+let camZoom = CAM_ZOOM_MAX;
 camera.position.set(0, 6, 18);
 camera.lookAt(0, 2, 0);
 
@@ -496,12 +502,26 @@ function animateSamurai(fig, time) {
     if (moving) {
         const cycle = Math.sin(t);
         const cycleB = Math.sin(t + Math.PI);
+        const faceState = resolveFaceState(d.vx, d.vz || 0);
+        const depthWalk = faceState === 'front' || faceState === 'back';
 
         // Legs swing
-        d.upperLegL.rotation.z = cycle * 0.3;
-        d.lowerLegL.rotation.z = Math.max(0, -cycle) * 0.35;
-        d.upperLegR.rotation.z = cycleB * 0.3;
-        d.lowerLegR.rotation.z = Math.max(0, -cycleB) * 0.35;
+        if (depthWalk) {
+            // Tight profile: minimal side swing, offset in depth
+            d.upperLegL.rotation.z = cycle * 0.08;
+            d.lowerLegL.rotation.z = Math.max(0, -cycle) * 0.1;
+            d.upperLegR.rotation.z = cycleB * 0.08;
+            d.lowerLegR.rotation.z = Math.max(0, -cycleB) * 0.1;
+            d.upperLegL.position.z = cycle * 0.12;
+            d.upperLegR.position.z = cycleB * 0.12;
+        } else {
+            d.upperLegL.rotation.z = cycle * 0.3;
+            d.lowerLegL.rotation.z = Math.max(0, -cycle) * 0.35;
+            d.upperLegR.rotation.z = cycleB * 0.3;
+            d.lowerLegR.rotation.z = Math.max(0, -cycleB) * 0.35;
+            d.upperLegL.position.z = 0;
+            d.upperLegR.position.z = 0;
+        }
 
         // Arms swing opposite, staff arm less
         d.upperArmBack.rotation.z = -0.15 + cycle * 0.15;
@@ -515,6 +535,8 @@ function animateSamurai(fig, time) {
         d.lowerLegL.rotation.z = 0;
         d.upperLegR.rotation.z = -breath;
         d.lowerLegR.rotation.z = 0;
+        d.upperLegL.position.z = 0;
+        d.upperLegR.position.z = 0;
 
         d.upperArmBack.rotation.z = -0.15 + breath;
         d.forearmBack.rotation.z = 0.15;
@@ -616,7 +638,8 @@ function update() {
     // Procedural ground
     updateGroundChunks(player.position.x, player.position.z);
 
-    // Camera follow
+    // Camera follow with zoom
+    CAM_OFFSET.copy(CAM_OFFSET_DEFAULT).multiplyScalar(camZoom);
     const targetCamPos = new THREE.Vector3(
         player.position.x + CAM_OFFSET.x,
         CAM_OFFSET.y,
@@ -650,6 +673,12 @@ function update() {
 }
 
 // ── Resize ─────────────────────────────────────────────────────────
+window.addEventListener('wheel', (e) => {
+    const dir = Math.sign(e.deltaY);
+    camZoom += dir * CAM_ZOOM_STEP;
+    camZoom = Math.max(CAM_ZOOM_MIN, Math.min(CAM_ZOOM_MAX, camZoom));
+}, { passive: true });
+
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();

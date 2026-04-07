@@ -8,7 +8,7 @@ export function resolveFaceState(vx, vz) {
     if (side)   return FaceState.SIDE;
     if (toward) return FaceState.FRONT;
     if (away)   return FaceState.BACK;
-    return FaceState.FRONT; // idle
+    return FaceState.BACK; // idle
 }
 
 export function applyFaceState(d, state) {
