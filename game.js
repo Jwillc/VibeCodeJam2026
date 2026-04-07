@@ -179,12 +179,12 @@ function createCloud(x, y, z, scale) {
 }
 
 const clouds = [];
-const cloudBaseY = [20, 24, 19, 22, 23]; // height above player
-clouds.push(createCloud(-8, cloudBaseY[0], -15, 1.5));
-clouds.push(createCloud(6, cloudBaseY[1], -20, 1.2));
-clouds.push(createCloud(18, cloudBaseY[2], -12, 1.0));
-clouds.push(createCloud(-15, cloudBaseY[3], -25, 1.8));
-clouds.push(createCloud(25, cloudBaseY[4], -18, 1.3));
+const CLOUD_WORLD_Y = [45, 49, 44, 47, 48]; // fixed world heights
+clouds.push(createCloud(-8, CLOUD_WORLD_Y[0], -15, 1.5));
+clouds.push(createCloud(6, CLOUD_WORLD_Y[1], -20, 1.2));
+clouds.push(createCloud(18, CLOUD_WORLD_Y[2], -12, 1.0));
+clouds.push(createCloud(-15, CLOUD_WORLD_Y[3], -25, 1.8));
+clouds.push(createCloud(25, CLOUD_WORLD_Y[4], -18, 1.3));
 
 // ── Helper: shape builders ─────────────────────────────────────────
 function makeRect(w, h, mat) {
@@ -626,13 +626,13 @@ function update() {
     // Day/night cycle
     updateDayNight(time);
 
-    // Clouds drift, stay high relative to player altitude
+    // Clouds drift at fixed world height, follow player horizontally
     clouds.forEach((c, i) => {
         c.position.x += (0.15 + i * 0.05) * dt;
         if (c.position.x > player.position.x + 40) {
             c.position.x = player.position.x - 40;
         }
-        c.position.y = player.position.y + cloudBaseY[i];
+        c.position.y = CLOUD_WORLD_Y[i];
     });
 
     // Render
