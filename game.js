@@ -3,8 +3,8 @@ import { applyFaceState, resolveFaceState } from './characterState.js';
 
 // ── Scene setup ────────────────────────────────────────────────────
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xd4d4d8);
-scene.fog = new THREE.Fog(0xd4d4d8, 30, 80);
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.Fog(0x87ceeb, 60, 150);
 
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 200);
 const CAM_OFFSET = new THREE.Vector3(0, 6, 18);
@@ -40,7 +40,8 @@ const vignetteQuad = new THREE.Mesh(
 vignetteScene.add(vignetteQuad);
 
 // ── Lighting ───────────────────────────────────────────────────────
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+scene.add(ambientLight);
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
 dirLight.position.set(5, 15, 10);
 dirLight.castShadow = true;
@@ -187,7 +188,7 @@ function createGroundChunk(cx, cz) {
 function updateGroundChunks(px, pz) {
     const pcx = Math.round(px / CHUNK_SIZE_X);
     const pcz = Math.round(pz / CHUNK_SIZE_Z);
-    const radius = 3;
+    const radius = 6;
 
     for (let dx = -radius; dx <= radius; dx++) {
         for (let dz = -radius; dz <= radius; dz++) {
@@ -522,6 +523,69 @@ function animateSamurai(fig, time) {
     }
 }
 
+// ── Day/Night cycle ───────────────────────────────────────────────
+const DAY_DURATION = 60 * 60;   // 60 minutes in seconds
+const NIGHT_DURATION = 10 * 60; // 10 minutes in seconds
+const CYCLE_DURATION = DAY_DURATION + NIGHT_DURATION; // 70 minutes total
+const TRANSITION = 0.05; // fraction of cycle for dawn/dusk transitions
+
+const dayColor = new THREE.Color(0x87ceeb);
+const sunsetColor = new THREE.Color(0xd4956a);
+const nightColor = new THREE.Color(0x0a0e1a);
+
+const dayDirColor = new THREE.Color(0xfff8e7);
+const sunsetDirColor = new THREE.Color(0xff8844);
+const nightDirColor = new THREE.Color(0x223366);
+
+function updateDayNight(elapsed) {
+    const t = (elapsed % CYCLE_DURATION) / CYCLE_DURATION;
+    const dayEnd = DAY_DURATION / CYCLE_DURATION;       // ~0.857
+    const nightStart = dayEnd;
+    const nightEnd = 1.0;
+
+    let sunAmount; // 1 = full day, 0 = full night
+    if (t < dayEnd - TRANSITION) {
+        // Full day
+        sunAmount = 1;
+    } else if (t < dayEnd) {
+        // Dusk transition
+        sunAmount = 1 - (t - (dayEnd - TRANSITION)) / TRANSITION;
+    } else if (t < nightEnd - TRANSITION) {
+        // Full night
+        sunAmount = 0;
+    } else {
+        // Dawn transition
+        sunAmount = (t - (nightEnd - TRANSITION)) / TRANSITION;
+    }
+
+    // Smooth the transition
+    sunAmount = sunAmount * sunAmount * (3 - 2 * sunAmount);
+
+    // Sky & fog color
+    const skyColor = new THREE.Color();
+    if (sunAmount > 0.5) {
+        skyColor.lerpColors(sunsetColor, dayColor, (sunAmount - 0.5) * 2);
+    } else {
+        skyColor.lerpColors(nightColor, sunsetColor, sunAmount * 2);
+    }
+    scene.background.copy(skyColor);
+    scene.fog.color.copy(skyColor);
+
+    // Lighting
+    ambientLight.intensity = THREE.MathUtils.lerp(0.08, 0.6, sunAmount);
+    dirLight.intensity = THREE.MathUtils.lerp(0.05, 0.8, sunAmount);
+
+    if (sunAmount > 0.5) {
+        dirLight.color.lerpColors(sunsetDirColor, dayDirColor, (sunAmount - 0.5) * 2);
+    } else {
+        dirLight.color.lerpColors(nightDirColor, sunsetDirColor, sunAmount * 2);
+    }
+
+    // Fog distance - closer at night for atmosphere
+    scene.fog.near = THREE.MathUtils.lerp(10, 60, sunAmount);
+    scene.fog.far = THREE.MathUtils.lerp(35, 150, sunAmount);
+}
+
 // ── Main loop ──────────────────────────────────────────────────────
 const clock = new THREE.Clock();
 
@@ -565,6 +629,9 @@ function update() {
     dirLight.position.set(player.position.x + 5, 15, player.position.z + 10);
     dirLight.target.position.set(player.position.x, 0, player.position.z);
     dirLight.target.updateMatrixWorld();
+
+    // Day/night cycle
+    updateDayNight(time);
 
     // Clouds drift
     clouds.forEach((c, i) => {
