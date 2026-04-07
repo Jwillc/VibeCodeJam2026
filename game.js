@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { applyFaceState, resolveFaceState } from './characterState.js';
 import { updateSprint, updateHUD } from './playerStats.js';
+import { addCollider, removeCollidersInChunk, resolveCollision } from './collision.js';
 
 // ── Scene setup ────────────────────────────────────────────────────
 const scene = new THREE.Scene();
@@ -186,6 +187,8 @@ function createGroundChunk(cx, cz) {
         const tx = worldX + (seededRand(treeSeed + i * 17.3) - 0.5) * (CHUNK_SIZE_X - 4);
         const tz = worldZ + (seededRand(treeSeed + i * 31.7) - 0.5) * (CHUNK_SIZE_Z - 4);
         const tree = createTree(tx, tz, treeSeed + i);
+        const treeScale = (0.8 + Math.abs(Math.sin(treeSeed + i)) * 0.6) * 2.2;
+        addCollider(tx, tz, 0.25 * treeScale + 0.3);
         trees.push(tree);
     }
 
@@ -207,6 +210,7 @@ function updateGroundChunks(px, pz) {
         const [cx, cz] = key.split(',').map(Number);
         if (Math.abs(cx - pcx) > radius + 1 || Math.abs(cz - pcz) > radius + 1) {
             scene.remove(chunk.ground);
+            removeCollidersInChunk(chunk.trees);
             chunk.trees.forEach(t => scene.remove(t));
             groundChunks.delete(key);
         }
@@ -630,8 +634,11 @@ function update() {
     updateSprint(pd, keys, dt);
     updateHUD();
 
-    player.position.x += pd.vx * dt;
-    player.position.z += pd.vz * dt;
+    const newX = player.position.x + pd.vx * dt;
+    const newZ = player.position.z + pd.vz * dt;
+    const resolved = resolveCollision(player.position.x, player.position.z, newX, newZ);
+    player.position.x = resolved.x;
+    player.position.z = resolved.z;
     player.position.y = GROUND_Y;
 
     animateSamurai(player, time);
