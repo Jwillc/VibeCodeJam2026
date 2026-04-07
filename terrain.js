@@ -65,14 +65,15 @@ function mountainHeight(x, z) {
     const mask = mountainMask(x, z);
     if (mask <= 0) return 0;
 
-    // Ridged noise for craggy peaks
+    // Rounded ridged noise for natural peaks
     let ridged = Math.abs(smoothNoise(x * MTN_RIDGE_SCALE + 200, z * MTN_RIDGE_SCALE + 200) - 0.5) * 2;
-    ridged = 1 - ridged; // invert so peaks are high
-    ridged = ridged * ridged; // sharpen peaks
+    ridged = 1 - ridged;
+    // Softer power curve for rounder peaks
+    ridged = ridged * ridged * (3 - 2 * ridged); // smoothstep shape
 
-    const detail = fbm(x * MTN_DETAIL_SCALE, z * MTN_DETAIL_SCALE, 3, 2.0, 0.5);
+    const detail = fbm(x * MTN_DETAIL_SCALE, z * MTN_DETAIL_SCALE, 3, 2.0, 0.4);
 
-    return mask * (ridged * MTN_HEIGHT + detail * 4);
+    return mask * (ridged * MTN_HEIGHT + detail * 2.5);
 }
 
 // ── Combined height ──
@@ -125,7 +126,7 @@ export function isMountainZone(x, z) {
     return mountainMask(x, z) > 0.3;
 }
 
-const TERRAIN_SEGS = 32;
+const TERRAIN_SEGS = 64;
 
 export function applyTerrainToChunk(geometry, worldX, worldZ, chunkSizeX, chunkSizeZ) {
     const pos = geometry.attributes.position;

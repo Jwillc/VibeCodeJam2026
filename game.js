@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { applyFaceState, resolveFaceState } from './characterState.js';
 import { updateSprint, updateHUD, getStamina } from './playerStats.js';
-import { addCollider, removeCollidersInChunk, resolveCollision } from './collision.js';
-import { getHeight, getUphillFactor, isTooSteep, isMountainZone, applyTerrainToChunk, TERRAIN_SEGS } from './terrain.js';
+import { resolveCollision } from './collision.js';
+import { getHeight, getUphillFactor, isTooSteep, applyTerrainToChunk, TERRAIN_SEGS } from './terrain.js';
+import { spawnChunkTrees, removeChunkTrees } from './trees.js';
 
 // ── Scene setup ────────────────────────────────────────────────────
 const scene = new THREE.Scene();
@@ -70,9 +71,6 @@ const groundSideMat = new THREE.MeshStandardMaterial({ color: 0x5a6a4a, roughnes
 const cloudMat = new THREE.MeshBasicMaterial({ color: 0xb0b0b8 });
 const cloudDarkMat = new THREE.MeshBasicMaterial({ color: 0x8a8a92 });
 const dirtSpotMat = new THREE.MeshStandardMaterial({ color: 0x5a6a4a, roughness: 1 });
-const trunkMat = new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.9 });
-const leavesMat = new THREE.MeshStandardMaterial({ color: 0x4a6a2a, roughness: 0.8 });
-const leavesDarkMat = new THREE.MeshStandardMaterial({ color: 0x3a5a1a, roughness: 0.8 });
 
 // Character materials (wooden samurai palette)
 const bodyBrownMat = new THREE.MeshBasicMaterial({ color: 0x8B6844 });       // dark brown body
@@ -82,52 +80,6 @@ const limbTanDarkMat = new THREE.MeshBasicMaterial({ color: 0xA08850 });     // 
 const faceMaskMat = new THREE.MeshBasicMaterial({ color: 0xC4A872 });        // tan face (matches skin)
 const outlineMat = new THREE.MeshBasicMaterial({ color: 0x2A1A0A });         // dark outline
 const bootMat = new THREE.MeshBasicMaterial({ color: 0x6B4830 });            // boot color
-
-// ── Tree creation ──────────────────────────────────────────────────
-function createTree(x, z, seed) {
-    const group = new THREE.Group();
-    const s = (0.8 + Math.abs(Math.sin(seed)) * 0.6) * 2.2; // size variation, scaled up
-
-    // Trunk
-    const trunk = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.15 * s, 0.25 * s, 2.5 * s, 8),
-        trunkMat
-    );
-    trunk.position.y = 1.25 * s;
-    trunk.castShadow = true;
-    group.add(trunk);
-
-    // Foliage layers (stacked spheres/cones for a stylized look)
-    const foliageBottom = new THREE.Mesh(
-        new THREE.ConeGeometry(1.4 * s, 2.0 * s, 8),
-        leavesDarkMat
-    );
-    foliageBottom.position.y = 2.8 * s;
-    foliageBottom.castShadow = true;
-    group.add(foliageBottom);
-
-    const foliageMid = new THREE.Mesh(
-        new THREE.ConeGeometry(1.1 * s, 1.6 * s, 8),
-        leavesMat
-    );
-    foliageMid.position.y = 3.6 * s;
-    foliageMid.castShadow = true;
-    group.add(foliageMid);
-
-    const foliageTop = new THREE.Mesh(
-        new THREE.ConeGeometry(0.7 * s, 1.2 * s, 7),
-        leavesDarkMat
-    );
-    foliageTop.position.y = 4.3 * s;
-    foliageTop.castShadow = true;
-    group.add(foliageTop);
-
-    group.position.set(x, GROUND_Y + getHeight(x, z), z);
-    // Slight random rotation for variety
-    group.rotation.y = seed * 1.7;
-    scene.add(group);
-    return group;
-}
 
 // ── Procedural Ground with Trees ───────────────────────────────────
 const GROUND_Y = -2;
@@ -179,18 +131,7 @@ function createGroundChunk(cx, cz) {
     scene.add(group);
 
     // Trees for this chunk
-    const treeSeed = cx * 3571 + cz * 8923;
-    const treeCount = 4 + Math.floor(seededRand(treeSeed) * 6); // 4-9 trees per chunk
-    const trees = [];
-    for (let i = 0; i < treeCount; i++) {
-        const tx = worldX + (seededRand(treeSeed + i * 17.3) - 0.5) * (CHUNK_SIZE_X - 4);
-        const tz = worldZ + (seededRand(treeSeed + i * 31.7) - 0.5) * (CHUNK_SIZE_Z - 4);
-        if (isMountainZone(tx, tz)) continue; // no trees on mountains
-        const tree = createTree(tx, tz, treeSeed + i);
-        const treeScale = (0.8 + Math.abs(Math.sin(treeSeed + i)) * 0.6) * 2.2;
-        addCollider(tx, tz, 0.25 * treeScale + 0.3);
-        trees.push(tree);
-    }
+    const trees = spawnChunkTrees(scene, cx, cz, CHUNK_SIZE_X, CHUNK_SIZE_Z, GROUND_Y);
 
     groundChunks.set(key, { ground: group, trees });
 }
@@ -210,8 +151,7 @@ function updateGroundChunks(px, pz) {
         const [cx, cz] = key.split(',').map(Number);
         if (Math.abs(cx - pcx) > radius + 1 || Math.abs(cz - pcz) > radius + 1) {
             scene.remove(chunk.ground);
-            removeCollidersInChunk(chunk.trees);
-            chunk.trees.forEach(t => scene.remove(t));
+            removeChunkTrees(scene, chunk.trees);
             groundChunks.delete(key);
         }
     }
@@ -671,6 +611,10 @@ function update() {
         player.position.y + CAM_OFFSET.y,
         player.position.z + CAM_OFFSET.z
     );
+    // Prevent camera from clipping into terrain
+    const terrainAtCam = GROUND_Y + getHeight(targetCamPos.x, targetCamPos.z);
+    const minCamY = terrainAtCam + 3;
+    if (targetCamPos.y < minCamY) targetCamPos.y = minCamY;
     camera.position.lerp(targetCamPos, 3 * dt);
     camera.lookAt(player.position.x, player.position.y + 4, player.position.z);
 
