@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { applyFaceState, resolveFaceState } from './characterState.js';
+import { updateSprint, updateHUD } from './playerStats.js';
 
 // ── Scene setup ────────────────────────────────────────────────────
 const scene = new THREE.Scene();
@@ -83,7 +84,7 @@ const bootMat = new THREE.MeshBasicMaterial({ color: 0x6B4830 });            // 
 // ── Tree creation ──────────────────────────────────────────────────
 function createTree(x, z, seed) {
     const group = new THREE.Group();
-    const s = 0.8 + Math.abs(Math.sin(seed)) * 0.6; // size variation
+    const s = (0.8 + Math.abs(Math.sin(seed)) * 0.6) * 2.2; // size variation, scaled up
 
     // Trunk
     const trunk = new THREE.Mesh(
@@ -179,7 +180,7 @@ function createGroundChunk(cx, cz) {
 
     // Trees for this chunk
     const treeSeed = cx * 3571 + cz * 8923;
-    const treeCount = 2 + Math.floor(seededRand(treeSeed) * 4); // 2-5 trees per chunk
+    const treeCount = 4 + Math.floor(seededRand(treeSeed) * 6); // 4-9 trees per chunk
     const trees = [];
     for (let i = 0; i < treeCount; i++) {
         const tx = worldX + (seededRand(treeSeed + i * 17.3) - 0.5) * (CHUNK_SIZE_X - 4);
@@ -625,6 +626,9 @@ function update() {
     if (keys['d'] || keys['arrowright']) { pd.vx = PLAYER_SPEED; pd.facing = 1; }
     if (keys['w'] || keys['arrowup']) { pd.vz = -PLAYER_SPEED_Z; }
     if (keys['s'] || keys['arrowdown']) { pd.vz = PLAYER_SPEED_Z; }
+
+    updateSprint(pd, keys, dt);
+    updateHUD();
 
     player.position.x += pd.vx * dt;
     player.position.z += pd.vz * dt;
