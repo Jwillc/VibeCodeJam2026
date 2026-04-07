@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { applyFaceState, resolveFaceState } from './characterState.js';
-import { updateSprint, updateHUD } from './playerStats.js';
+import { updateSprint, updateHUD, getStamina } from './playerStats.js';
 import { addCollider, removeCollidersInChunk, resolveCollision } from './collision.js';
+import { getHeight, getUphillFactor, applyTerrainToChunk, TERRAIN_SEGS } from './terrain.js';
 
 // ── Scene setup ────────────────────────────────────────────────────
 const scene = new THREE.Scene();
@@ -121,7 +122,7 @@ function createTree(x, z, seed) {
     foliageTop.castShadow = true;
     group.add(foliageTop);
 
-    group.position.set(x, GROUND_Y, z);
+    group.position.set(x, GROUND_Y + getHeight(x, z), z);
     // Slight random rotation for variety
     group.rotation.y = seed * 1.7;
     scene.add(group);
@@ -150,12 +151,12 @@ function createGroundChunk(cx, cz) {
     const worldX = cx * CHUNK_SIZE_X;
     const worldZ = cz * CHUNK_SIZE_Z;
 
-    // Ground surface
-    const top = new THREE.Mesh(
-        new THREE.BoxGeometry(CHUNK_SIZE_X, 1, CHUNK_SIZE_Z),
-        [groundSideMat, groundSideMat, groundMat, groundSideMat, groundSideMat, groundSideMat]
-    );
-    top.position.set(worldX, GROUND_Y - 0.5, worldZ);
+    // Ground surface with terrain
+    const planeGeo = new THREE.PlaneGeometry(CHUNK_SIZE_X, CHUNK_SIZE_Z, TERRAIN_SEGS, TERRAIN_SEGS);
+    planeGeo.rotateX(-Math.PI / 2);
+    applyTerrainToChunk(planeGeo, worldX, worldZ, CHUNK_SIZE_X, CHUNK_SIZE_Z);
+    const top = new THREE.Mesh(planeGeo, groundMat);
+    top.position.set(worldX, GROUND_Y, worldZ);
     top.receiveShadow = true;
     group.add(top);
 
@@ -169,11 +170,9 @@ function createGroundChunk(cx, cz) {
             dirtSpotMat
         );
         spot.rotation.x = -Math.PI / 2;
-        spot.position.set(
-            worldX + rx * CHUNK_SIZE_X * 0.9,
-            GROUND_Y + 0.01,
-            worldZ + rz * CHUNK_SIZE_Z * 0.9
-        );
+        const spotX = worldX + rx * CHUNK_SIZE_X * 0.9;
+        const spotZ = worldZ + rz * CHUNK_SIZE_Z * 0.9;
+        spot.position.set(spotX, GROUND_Y + getHeight(spotX, spotZ) + 0.01, spotZ);
         group.add(spot);
     }
 
@@ -634,17 +633,25 @@ function update() {
     updateSprint(pd, keys, dt);
     updateHUD();
 
+    // Uphill slowdown based on stamina (low stamina = more slowdown)
+    const uphill = getUphillFactor(player.position.x, player.position.z, pd.vx, pd.vz);
+    const staminaPct = getStamina() / 100;
+    const uphillPenalty = 1 - uphill * (1.2 - staminaPct * 0.7); // more penalty at low stamina
+    const moveMult = Math.max(0.3, Math.min(1, uphillPenalty));
+    pd.vx *= moveMult;
+    pd.vz *= moveMult;
+
     const newX = player.position.x + pd.vx * dt;
     const newZ = player.position.z + pd.vz * dt;
     const resolved = resolveCollision(player.position.x, player.position.z, newX, newZ);
     player.position.x = resolved.x;
     player.position.z = resolved.z;
-    player.position.y = GROUND_Y;
+    player.position.y = GROUND_Y + getHeight(resolved.x, resolved.z);
 
     animateSamurai(player, time);
 
     // Update blob shadow
-    playerShadow.position.set(player.position.x, GROUND_Y + 0.02, player.position.z);
+    playerShadow.position.set(player.position.x, player.position.y + 0.02, player.position.z);
 
     // Procedural ground
     updateGroundChunks(player.position.x, player.position.z);
@@ -657,7 +664,7 @@ function update() {
         player.position.z + CAM_OFFSET.z
     );
     camera.position.lerp(targetCamPos, 3 * dt);
-    camera.lookAt(player.position.x, 2, player.position.z);
+    camera.lookAt(player.position.x, player.position.y + 4, player.position.z);
 
     // Light follows player
     dirLight.position.set(player.position.x + 5, 15, player.position.z + 10);
