@@ -1,10 +1,22 @@
 import * as THREE from 'three';
 import { getHeight, getSlope, isMountainZone } from './terrain.js';
 import { addCollider, removeCollidersInChunk } from './collision.js';
+import { getBiome, getBiomeBorderBlend, BIOME } from './biome.js';
 
-const trunkMat = new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.9 });
-const leavesMat = new THREE.MeshStandardMaterial({ color: 0x4a6a2a, roughness: 0.8 });
-const leavesDarkMat = new THREE.MeshStandardMaterial({ color: 0x3a5a1a, roughness: 0.8 });
+// ── Pine materials (dark conifer greens) ──
+const pineTrunkMat = new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.9 });
+const pineLeafMat = new THREE.MeshStandardMaterial({ color: 0x4a6a2a, roughness: 0.8 });
+const pineLeafDarkMat = new THREE.MeshStandardMaterial({ color: 0x3a5a1a, roughness: 0.8 });
+
+// ── Oak materials (warmer greens, browner trunk) ──
+const oakTrunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3520, roughness: 0.85 });
+const oakLeafMat = new THREE.MeshStandardMaterial({ color: 0x5a7a30, roughness: 0.75 });
+const oakLeafDarkMat = new THREE.MeshStandardMaterial({ color: 0x4a6820, roughness: 0.75 });
+
+// ── Birch materials (pale trunk, lighter greens) ──
+const birchTrunkMat = new THREE.MeshStandardMaterial({ color: 0xc8b89a, roughness: 0.7 });
+const birchLeafMat = new THREE.MeshStandardMaterial({ color: 0x6a8a3a, roughness: 0.7 });
+const birchLeafDarkMat = new THREE.MeshStandardMaterial({ color: 0x5a7a2a, roughness: 0.7 });
 
 function seededRand(seed) {
     // Integer hash that works well with negative seeds
@@ -15,42 +27,86 @@ function seededRand(seed) {
     return ((s >>> 0) % 10000) / 10000;
 }
 
-function createTree(scene, x, z, seed, groundY) {
-    const group = new THREE.Group();
-    const s = (0.8 + Math.abs(Math.sin(seed)) * 0.8) * 5.5;
-
-    // Tall trunk — bare wood before foliage starts high up
+// ── Pine: tall, narrow conifer silhouette (stacked cones) ──
+function createPine(group, s) {
     const trunk = new THREE.Mesh(
         new THREE.CylinderGeometry(0.12 * s, 0.22 * s, 3.2 * s, 8),
-        trunkMat
+        pineTrunkMat
     );
     trunk.position.y = 1.6 * s;
     trunk.castShadow = true;
     group.add(trunk);
 
-    const foliageBottom = new THREE.Mesh(
-        new THREE.ConeGeometry(1.3 * s, 2.2 * s, 8),
-        leavesDarkMat
-    );
-    foliageBottom.position.y = 3.6 * s;
-    foliageBottom.castShadow = true;
-    group.add(foliageBottom);
+    const f0 = new THREE.Mesh(new THREE.ConeGeometry(1.3 * s, 2.2 * s, 8), pineLeafDarkMat);
+    f0.position.y = 3.6 * s; f0.castShadow = true; group.add(f0);
 
-    const foliageMid = new THREE.Mesh(
-        new THREE.ConeGeometry(1.0 * s, 1.8 * s, 8),
-        leavesMat
-    );
-    foliageMid.position.y = 4.5 * s;
-    foliageMid.castShadow = true;
-    group.add(foliageMid);
+    const f1 = new THREE.Mesh(new THREE.ConeGeometry(1.0 * s, 1.8 * s, 8), pineLeafMat);
+    f1.position.y = 4.5 * s; f1.castShadow = true; group.add(f1);
 
-    const foliageTop = new THREE.Mesh(
-        new THREE.ConeGeometry(0.6 * s, 1.4 * s, 7),
-        leavesDarkMat
+    const f2 = new THREE.Mesh(new THREE.ConeGeometry(0.6 * s, 1.4 * s, 7), pineLeafDarkMat);
+    f2.position.y = 5.3 * s; f2.castShadow = true; group.add(f2);
+}
+
+// ── Oak: shorter, wider, rounder canopy (stacked spheres) ──
+function createOak(group, s) {
+    const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18 * s, 0.3 * s, 2.6 * s, 8),
+        oakTrunkMat
     );
-    foliageTop.position.y = 5.3 * s;
-    foliageTop.castShadow = true;
-    group.add(foliageTop);
+    trunk.position.y = 1.3 * s;
+    trunk.castShadow = true;
+    group.add(trunk);
+
+    const canopy0 = new THREE.Mesh(new THREE.SphereGeometry(1.4 * s, 8, 6), oakLeafDarkMat);
+    canopy0.position.y = 3.4 * s; canopy0.castShadow = true; group.add(canopy0);
+
+    const canopy1 = new THREE.Mesh(new THREE.SphereGeometry(1.1 * s, 8, 6), oakLeafMat);
+    canopy1.position.y = 4.1 * s; canopy1.castShadow = true; group.add(canopy1);
+
+    const canopy2 = new THREE.Mesh(new THREE.SphereGeometry(0.7 * s, 7, 5), oakLeafDarkMat);
+    canopy2.position.y = 4.6 * s; canopy2.castShadow = true; group.add(canopy2);
+}
+
+// ── Birch: slender, tall trunk with lighter, sparser foliage ──
+function createBirch(group, s) {
+    const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.08 * s, 0.14 * s, 3.6 * s, 8),
+        birchTrunkMat
+    );
+    trunk.position.y = 1.8 * s;
+    trunk.castShadow = true;
+    group.add(trunk);
+
+    const f0 = new THREE.Mesh(new THREE.ConeGeometry(0.9 * s, 2.4 * s, 7), birchLeafDarkMat);
+    f0.position.y = 4.0 * s; f0.castShadow = true; group.add(f0);
+
+    const f1 = new THREE.Mesh(new THREE.ConeGeometry(0.65 * s, 1.8 * s, 7), birchLeafMat);
+    f1.position.y = 4.9 * s; f1.castShadow = true; group.add(f1);
+
+    const f2 = new THREE.Mesh(new THREE.ConeGeometry(0.4 * s, 1.2 * s, 6), birchLeafDarkMat);
+    f2.position.y = 5.6 * s; f2.castShadow = true; group.add(f2);
+}
+
+function pickSpecies(x, z, seed) {
+    const biome = getBiome(x, z);
+    const blend = getBiomeBorderBlend(x, z);
+    // At biome borders, sometimes pick a neighbor species for natural mixing
+    if (blend > 0.3 && seededRand(seed + 7777) < blend * 0.5) {
+        // Pick a random different species
+        const others = [BIOME.PINE_FOREST, BIOME.OAK_FOREST, BIOME.BIRCH_FOREST].filter(b => b !== biome);
+        return others[Math.floor(seededRand(seed + 8888) * others.length)];
+    }
+    return biome;
+}
+
+function createTree(scene, x, z, seed, groundY) {
+    const group = new THREE.Group();
+    const s = (0.8 + Math.abs(Math.sin(seed)) * 0.8) * 5.5;
+    const species = pickSpecies(x, z, seed);
+
+    if (species === BIOME.OAK_FOREST) createOak(group, s);
+    else if (species === BIOME.BIRCH_FOREST) createBirch(group, s);
+    else createPine(group, s);
 
     group.position.set(x, groundY + getHeight(x, z), z);
     group.rotation.y = seed * 1.7;
@@ -63,7 +119,7 @@ function getTreeScale(seed) {
 }
 
 function foliageRadius(scale) {
-    return 1.3 * scale; // matches widest cone (foliageBottom)
+    return 1.4 * scale; // covers widest species (oak spheres)
 }
 
 function tooCloseToExisting(tx, tz, treeScale, placed) {
