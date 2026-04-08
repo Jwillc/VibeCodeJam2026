@@ -109,7 +109,7 @@ function createTree(scene, x, z, seed, groundY) {
     else if (species === BIOME.BIRCH_FOREST) createBirch(group, s);
     else createPine(group, s);
 
-    group.position.set(x, groundY + getHeight(x, z), z);
+    group.position.set(x, groundY + getHeight(x, z) - 0.4 * s, z);
     group.rotation.y = seed * 1.7;
     scene.add(group);
     return group;

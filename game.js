@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { applyFaceState, resolveFaceState } from './characterState.js';
 import { updateSprint, updateHUD, getStamina, isSprinting } from './playerStats.js';
-import { updateSurvival, updateSurvivalHUD } from './survival.js';
+import { updateSurvival, updateSurvivalHUD, hydratePlayer } from './survival.js';
+import { detectActions } from './actionDetection.js';
+import { updateActionMenu, setActionCallback } from './actionMenu.js';
 import { resolveCollision } from './collision.js';
 import { getHeight, getUphillFactor, isTooSteep, applyTerrainToChunk, TERRAIN_SEGS } from './terrain.js';
 import { spawnChunkTrees, removeChunkTrees } from './trees.js';
@@ -592,6 +594,11 @@ function updateDayNight(elapsed) {
     scene.fog.far = THREE.MathUtils.lerp(35, 150, sunAmount);
 }
 
+// ── Action callbacks ──────────────────────────────────────────────
+setActionCallback((id) => {
+    if (id === 'drink') hydratePlayer(25);
+});
+
 // ── Main loop ──────────────────────────────────────────────────────
 const clock = new THREE.Clock();
 
@@ -659,6 +666,9 @@ function update() {
     player.position.x = resolved.x;
     player.position.z = resolved.z;
     player.position.y = GROUND_Y + getHeight(resolved.x, resolved.z);
+
+    // Action detection
+    updateActionMenu(detectActions(player.position.x, player.position.z));
 
     // Rotate player model to always face away from camera
     player.rotation.y = camOrbitAngle;

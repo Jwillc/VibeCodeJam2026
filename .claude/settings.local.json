@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(npx http-server:*)",
-      "Bash(npx serve:*)"
+      "Bash(npx serve:*)",
+      "WebFetch(domain:tympanus.net)"
     ]
   }
 }
