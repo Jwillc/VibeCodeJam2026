@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { getHeight, getSlope, isMountainZone } from './terrain.js';
 import { addCollider, removeCollidersInChunk } from './collision.js';
 import { getBiome, getBiomeBorderBlend, BIOME } from './biome.js';
+import { isLakeZone } from './terrain.js';
 
 // ── Pine materials (dark conifer greens) ──
 const pineTrunkMat = new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.9 });
@@ -146,6 +147,7 @@ export function spawnChunkTrees(scene, cx, cz, chunkSizeX, chunkSizeZ, groundY) 
     for (let i = 0; i < sparseCount; i++) {
         const tx = worldX + (seededRand(treeSeed + i * 53.9 + 77) - 0.5) * (chunkSizeX - 2);
         const tz = worldZ + (seededRand(treeSeed + i * 41.3 + 91) - 0.5) * (chunkSizeZ - 2);
+        if (isLakeZone(tx, tz)) continue;
         if (getSlope(tx, tz) > 1.8) continue;
         const treeScale = getTreeScale(treeSeed + i + 500);
         if (tooCloseToExisting(tx, tz, treeScale, placed)) continue;
@@ -160,6 +162,7 @@ export function spawnChunkTrees(scene, cx, cz, chunkSizeX, chunkSizeZ, groundY) 
     for (let i = 0; i < clusterCount; i++) {
         const tx = worldX + (seededRand(treeSeed + i * 17.3 + 3.1) - 0.5) * (chunkSizeX - 4);
         const tz = worldZ + (seededRand(treeSeed + i * 31.7 + 5.3) - 0.5) * (chunkSizeZ - 4);
+        if (isLakeZone(tx, tz)) continue;
         if (isMountainZone(tx, tz)) continue;
         if (getSlope(tx, tz) > 1.2) continue;
         const treeScale = getTreeScale(treeSeed + i);

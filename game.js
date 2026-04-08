@@ -4,6 +4,7 @@ import { updateSprint, updateHUD, getStamina } from './playerStats.js';
 import { resolveCollision } from './collision.js';
 import { getHeight, getUphillFactor, isTooSteep, applyTerrainToChunk, TERRAIN_SEGS } from './terrain.js';
 import { spawnChunkTrees, removeChunkTrees } from './trees.js';
+import { spawnChunkLakes, removeChunkLakes, isLake, updateLakes } from './lakes.js';
 
 // ── Scene setup ────────────────────────────────────────────────────
 const scene = new THREE.Scene();
@@ -11,13 +12,15 @@ scene.background = new THREE.Color(0x87ceeb);
 scene.fog = new THREE.Fog(0x87ceeb, 60, 150);
 
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 200);
-const CAM_OFFSET_DEFAULT = new THREE.Vector3(0, 6, 18);
-const CAM_OFFSET = CAM_OFFSET_DEFAULT.clone();
+const CAM_DISTANCE = 19;       // distance from player (before zoom)
+const CAM_HEIGHT = 6;          // height above player
 const CAM_ZOOM_STEPS = 8;
 const CAM_ZOOM_MIN = 0.45;
 const CAM_ZOOM_MAX = 1.0;
 const CAM_ZOOM_STEP = (CAM_ZOOM_MAX - CAM_ZOOM_MIN) / CAM_ZOOM_STEPS;
 let camZoom = CAM_ZOOM_MAX;
+let camOrbitAngle = 0;         // radians, 0 = behind (+Z), orbits around Y axis
+const CAM_ORBIT_SPEED = 0.003; // mouse sensitivity
 camera.position.set(0, 6, 18);
 camera.lookAt(0, 2, 0);
 
@@ -27,6 +30,20 @@ renderer.setPixelRatio(window.devicePixelRatio);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.prepend(renderer.domElement);
+
+// ── Mouse orbit controls ──
+let isOrbiting = false;
+renderer.domElement.addEventListener('mousedown', (e) => {
+    if (e.button === 2 || e.button === 0) {
+        isOrbiting = true;
+    }
+});
+window.addEventListener('mouseup', () => { isOrbiting = false; });
+window.addEventListener('mousemove', (e) => {
+    if (!isOrbiting) return;
+    camOrbitAngle -= e.movementX * CAM_ORBIT_SPEED;
+});
+renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // ── Vignette ───────────────────────────────────────────────────────
 const vignetteScene = new THREE.Scene();
@@ -133,7 +150,10 @@ function createGroundChunk(cx, cz) {
     // Trees for this chunk
     const trees = spawnChunkTrees(scene, cx, cz, CHUNK_SIZE_X, CHUNK_SIZE_Z, GROUND_Y);
 
-    groundChunks.set(key, { ground: group, trees });
+    // Lakes for this chunk
+    const lakes = spawnChunkLakes(scene, cx, cz, CHUNK_SIZE_X, CHUNK_SIZE_Z, GROUND_Y);
+
+    groundChunks.set(key, { ground: group, trees, lakes });
 }
 
 function updateGroundChunks(px, pz) {
@@ -152,6 +172,7 @@ function updateGroundChunks(px, pz) {
         if (Math.abs(cx - pcx) > radius + 1 || Math.abs(cz - pcz) > radius + 1) {
             scene.remove(chunk.ground);
             removeChunkTrees(scene, chunk.trees);
+            removeChunkLakes(scene, chunk.lakes);
             groundChunks.delete(key);
         }
     }
@@ -438,17 +459,20 @@ const PLAYER_SPEED_Z = 4;
 // ── Animate samurai ────────────────────────────────────────────────
 function animateSamurai(fig, time) {
     const d = fig.userData;
-    const moving = Math.abs(d.vx) > 0.5 || Math.abs(d.vz || 0) > 0.5;
+    const lx = d.localInputX || 0;
+    const lz = d.localInputZ || 0;
+    const moving = Math.abs(lx) > 0.1 || Math.abs(lz) > 0.1;
     const t = time * 7;
 
     fig.scale.x = d.facing;
 
-    applyFaceState(d, resolveFaceState(d.vx, d.vz || 0));
+    // Use local (screen-space) input for face state
+    applyFaceState(d, resolveFaceState(lx, lz));
 
     if (moving) {
         const cycle = Math.sin(t);
         const cycleB = Math.sin(t + Math.PI);
-        const faceState = resolveFaceState(d.vx, d.vz || 0);
+        const faceState = resolveFaceState(lx, lz);
         const depthWalk = faceState === 'front' || faceState === 'back';
 
         // Legs swing
@@ -564,13 +588,31 @@ function update() {
 
     const pd = player.userData;
 
-    // Movement
-    pd.vx = 0;
-    pd.vz = 0;
-    if (keys['a'] || keys['arrowleft']) { pd.vx = -PLAYER_SPEED; pd.facing = -1; }
-    if (keys['d'] || keys['arrowright']) { pd.vx = PLAYER_SPEED; pd.facing = 1; }
-    if (keys['w'] || keys['arrowup']) { pd.vz = -PLAYER_SPEED_Z; }
-    if (keys['s'] || keys['arrowdown']) { pd.vz = PLAYER_SPEED_Z; }
+    // Movement — relative to camera direction
+    let inputX = 0; // left/right (A/D)
+    let inputZ = 0; // forward/back (W/S)
+    if (keys['a'] || keys['arrowleft'])  inputX = -1;
+    if (keys['d'] || keys['arrowright']) inputX = 1;
+    if (keys['w'] || keys['arrowup'])    inputZ = 1;
+    if (keys['s'] || keys['arrowdown'])  inputZ = -1;
+
+    // Camera forward is from camera toward player (along the ground)
+    const camFwdX = -Math.sin(camOrbitAngle);
+    const camFwdZ = -Math.cos(camOrbitAngle);
+    // Camera right is perpendicular
+    const camRightX = Math.cos(camOrbitAngle);
+    const camRightZ = -Math.sin(camOrbitAngle);
+
+    pd.vx = (inputX * camRightX + inputZ * camFwdX) * PLAYER_SPEED;
+    pd.vz = (inputX * camRightZ + inputZ * camFwdZ) * PLAYER_SPEED_Z;
+
+    // Store local input for facing/animation (screen-space)
+    pd.localInputX = inputX;
+    pd.localInputZ = inputZ;
+
+    // Flip sprite based on screen-space left/right
+    if (inputX < 0) pd.facing = -1;
+    else if (inputX > 0) pd.facing = 1;
 
     updateSprint(pd, keys, dt);
     updateHUD();
@@ -582,6 +624,12 @@ function update() {
     const moveMult = Math.max(0.3, Math.min(1, uphillPenalty));
     pd.vx *= moveMult;
     pd.vz *= moveMult;
+
+    // Slow down in water
+    if (isLake(player.position.x, player.position.z)) {
+        pd.vx *= 0.55;
+        pd.vz *= 0.55;
+    }
 
     // Block movement if slope ahead is too steep
     if (isTooSteep(player.position.x, player.position.z, pd.vx, pd.vz)) {
@@ -596,6 +644,9 @@ function update() {
     player.position.z = resolved.z;
     player.position.y = GROUND_Y + getHeight(resolved.x, resolved.z);
 
+    // Rotate player model to always face away from camera
+    player.rotation.y = camOrbitAngle;
+
     animateSamurai(player, time);
 
     // Update blob shadow
@@ -604,18 +655,26 @@ function update() {
     // Procedural ground
     updateGroundChunks(player.position.x, player.position.z);
 
-    // Camera follow with zoom, adjusts to player altitude
-    CAM_OFFSET.copy(CAM_OFFSET_DEFAULT).multiplyScalar(camZoom);
+    // Animate water surfaces
+    updateLakes(time);
+
+    // Camera follow with orbit and zoom
+    const orbitDist = CAM_DISTANCE * camZoom;
+    const orbitHeight = CAM_HEIGHT * camZoom;
     const targetCamPos = new THREE.Vector3(
-        player.position.x + CAM_OFFSET.x,
-        player.position.y + CAM_OFFSET.y,
-        player.position.z + CAM_OFFSET.z
+        player.position.x + Math.sin(camOrbitAngle) * orbitDist,
+        player.position.y + orbitHeight,
+        player.position.z + Math.cos(camOrbitAngle) * orbitDist
     );
     // Prevent camera from clipping into terrain
     const terrainAtCam = GROUND_Y + getHeight(targetCamPos.x, targetCamPos.z);
     const minCamY = terrainAtCam + 3;
     if (targetCamPos.y < minCamY) targetCamPos.y = minCamY;
-    camera.position.lerp(targetCamPos, 3 * dt);
+    // Snap orbit rotation instantly; only lerp the follow offset for smooth walking
+    const followLerp = Math.min(1, 8 * dt);
+    camera.position.copy(targetCamPos);
+    // Smooth only the vertical (terrain bumps) by blending Y
+    camera.position.y = THREE.MathUtils.lerp(camera.position.y, targetCamPos.y, followLerp);
     camera.lookAt(player.position.x, player.position.y + 4, player.position.z);
 
     // Light follows player

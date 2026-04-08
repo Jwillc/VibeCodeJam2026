@@ -76,10 +76,56 @@ function mountainHeight(x, z) {
     return mask * (ridged * MTN_HEIGHT + detail * 2.5);
 }
 
-// ── Combined height ──
-export function getHeight(x, z) {
+// ── Lake regions ──
+// Low-frequency noise mask (same idea as mountains) picks where lakes go.
+// Only a few large blobs, never overlapping with mountains.
+const LAKE_MASK_SCALE = 0.005;   // very large blobs
+const LAKE_MASK_THRESH = 0.62;   // top ~38% of noise = lake candidate
+const WATER_LEVEL = 1.2;
+const LAKE_DEPTH = 2.5;          // how far below water level the center gets carved
+
+function lakeMask(x, z) {
+    // Unique offset so it doesn't correlate with mountain mask
+    const v = smoothNoise(x * LAKE_MASK_SCALE + 900, z * LAKE_MASK_SCALE + 600);
+    if (v < LAKE_MASK_THRESH) return 0;
+
+    // Smooth ramp: 0 at threshold edge, 1 deep inside
+    const t = (v - LAKE_MASK_THRESH) / (1 - LAKE_MASK_THRESH);
+    return Math.min(1, t * 1.5);
+}
+
+// Combined lake factor: lake noise AND not in mountains
+function lakeBasinFactor(x, z) {
+    if (mountainMask(x, z) > 0.1) return 0;
+    return lakeMask(x, z);
+}
+
+// Raw terrain before lake carving
+function rawHeight(x, z) {
     return baseHeight(x, z) + mountainHeight(x, z);
 }
+
+// ── Combined height ──
+export function getHeight(x, z) {
+    const h = rawHeight(x, z);
+    const basin = lakeBasinFactor(x, z);
+    if (basin <= 0) return h;
+
+    // Smoothly carve terrain down into a bowl shape
+    // At basin=1 (center), push well below water level
+    // At basin~0 (edge), barely touch the terrain — creates natural shoreline
+    const lakeFloor = WATER_LEVEL - 0.3 - basin * LAKE_DEPTH;
+    // Cubic ease for smoother bowl shape
+    const blend = basin * basin * (3 - 2 * basin);
+    return h + (lakeFloor - h) * blend;
+}
+
+// Public: check if position is in a lake zone (for trees, gameplay)
+export function isLakeZone(x, z) {
+    return lakeBasinFactor(x, z) > 0.05;
+}
+
+export { WATER_LEVEL };
 
 export function getSlope(x, z) {
     const d = 0.5;

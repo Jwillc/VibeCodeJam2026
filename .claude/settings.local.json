@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx http-server:*)"
+      "Bash(npx http-server:*)",
+      "Bash(npx serve:*)"
     ]
   }
 }
