@@ -51,6 +51,20 @@
             border-radius: 4px;
             transition: width 0.1s;
         }
+        #hunger-fill {
+            width: 100%;
+            height: 100%;
+            background: #e67e22;
+            border-radius: 4px;
+            transition: width 0.15s;
+        }
+        #thirst-fill {
+            width: 100%;
+            height: 100%;
+            background: #3498db;
+            border-radius: 4px;
+            transition: width 0.15s;
+        }
         #controls-hint {
             position: absolute;
             bottom: 20px;
@@ -75,6 +89,14 @@
         <div class="hud-bar">
             <span class="hud-label">SP</span>
             <div class="hud-track"><div id="stamina-fill"></div></div>
+        </div>
+        <div class="hud-bar">
+            <span class="hud-label">HN</span>
+            <div class="hud-track"><div id="hunger-fill"></div></div>
+        </div>
+        <div class="hud-bar">
+            <span class="hud-label">TH</span>
+            <div class="hud-track"><div id="thirst-fill"></div></div>
         </div>
     </div>
     <div id="controls-hint">A/D Move &bull; W/S Forward/Back &bull; Shift Sprint</div>

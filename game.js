@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { applyFaceState, resolveFaceState } from './characterState.js';
-import { updateSprint, updateHUD, getStamina } from './playerStats.js';
+import { updateSprint, updateHUD, getStamina, isSprinting } from './playerStats.js';
+import { updateSurvival, updateSurvivalHUD } from './survival.js';
 import { resolveCollision } from './collision.js';
 import { getHeight, getUphillFactor, isTooSteep, applyTerrainToChunk, TERRAIN_SEGS } from './terrain.js';
 import { spawnChunkTrees, removeChunkTrees } from './trees.js';
@@ -448,6 +449,19 @@ playerShadow.rotation.x = -Math.PI / 2;
 playerShadow.position.set(0, GROUND_Y + 0.02, 0);
 scene.add(playerShadow);
 
+// ── Soundtrack ────────────────────────────────────────────────────
+const bgm = new Audio('dusty_strings.wav');
+bgm.loop = true;
+bgm.volume = 0.4;
+let bgmStarted = false;
+function startBGM() {
+    if (bgmStarted) return;
+    bgmStarted = true;
+    bgm.play().catch(() => {});
+}
+window.addEventListener('keydown', startBGM, { once: false });
+window.addEventListener('mousedown', startBGM, { once: false });
+
 // ── Input ──────────────────────────────────────────────────────────
 const keys = {};
 window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
@@ -615,7 +629,9 @@ function update() {
     else if (inputX > 0) pd.facing = 1;
 
     updateSprint(pd, keys, dt);
+    updateSurvival(dt, isSprinting());
     updateHUD();
+    updateSurvivalHUD();
 
     // Uphill slowdown based on stamina (low stamina = more slowdown)
     const uphill = getUphillFactor(player.position.x, player.position.z, pd.vx, pd.vz);
