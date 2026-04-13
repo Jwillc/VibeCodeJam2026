@@ -13,6 +13,9 @@ const waterShader = new THREE.ShaderMaterial({
     side: THREE.FrontSide,
     uniforms: {
         uTime: { value: 0 },
+        uSkyColor: { value: new THREE.Color(0x87ceeb) },
+        uHorizonColor: { value: new THREE.Color(0xd9caa5) },
+        uSunAmount: { value: 1 },
     },
     vertexShader: `
         varying vec3 vWorldPos;
@@ -24,6 +27,9 @@ const waterShader = new THREE.ShaderMaterial({
     `,
     fragmentShader: `
         uniform float uTime;
+        uniform vec3 uSkyColor;
+        uniform vec3 uHorizonColor;
+        uniform float uSunAmount;
         varying vec3 vWorldPos;
 
         void main() {
@@ -38,9 +44,11 @@ const waterShader = new THREE.ShaderMaterial({
             vec3 shallow = vec3(0.22, 0.50, 0.58);
             vec3 deep    = vec3(0.10, 0.30, 0.42);
             vec3 col = mix(shallow, deep, 0.5 + ripple);
+            vec3 reflection = mix(uHorizonColor, uSkyColor, 0.35 + ripple * 0.4);
+            col = mix(col, reflection, 0.45);
 
             // Subtle highlight
-            col += max(0.0, ripple) * vec3(0.3, 0.4, 0.5);
+            col += max(0.0, ripple) * mix(vec3(0.18, 0.25, 0.3), uHorizonColor * 0.4, uSunAmount);
             col += min(0.0, ripple) * 0.15;
 
             gl_FragColor = vec4(col, 0.55);
@@ -92,6 +100,14 @@ export function removeChunkLakes(scene, lakeMeshes) {
         const idx = waterMats.indexOf(m.material);
         if (idx !== -1) waterMats.splice(idx, 1);
         m.material.dispose();
+    }
+}
+
+export function setLakeAtmosphere(skyColor, horizonColor, sunAmount) {
+    for (const mat of waterMats) {
+        mat.uniforms.uSkyColor.value.copy(skyColor);
+        mat.uniforms.uHorizonColor.value.copy(horizonColor);
+        mat.uniforms.uSunAmount.value = sunAmount;
     }
 }
 

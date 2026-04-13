@@ -5,17 +5,20 @@ import { getBiome, getBiomeBorderBlend, BIOME } from './biome.js';
 import { isLakeZone } from './terrain.js';
 
 // ── Pine materials (dark conifer greens) ──
-const pineTrunkMat = new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.9 });
+const pineTrunkColor = new THREE.Color(0x3a2a1a);
+const pineTrunkMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, vertexColors: true });
 const pineLeafMat = new THREE.MeshStandardMaterial({ color: 0x4a6a2a, roughness: 0.8 });
 const pineLeafDarkMat = new THREE.MeshStandardMaterial({ color: 0x3a5a1a, roughness: 0.8 });
 
 // ── Oak materials (warmer greens, browner trunk) ──
-const oakTrunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3520, roughness: 0.85 });
+const oakTrunkColor = new THREE.Color(0x4a3520);
+const oakTrunkMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, vertexColors: true });
 const oakLeafMat = new THREE.MeshStandardMaterial({ color: 0x5a7a30, roughness: 0.75 });
 const oakLeafDarkMat = new THREE.MeshStandardMaterial({ color: 0x4a6820, roughness: 0.75 });
 
 // ── Birch materials (pale trunk, lighter greens) ──
-const birchTrunkMat = new THREE.MeshStandardMaterial({ color: 0xc8b89a, roughness: 0.7 });
+const birchTrunkColor = new THREE.Color(0xc8b89a);
+const birchTrunkMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7, vertexColors: true });
 const birchLeafMat = new THREE.MeshStandardMaterial({ color: 0x6a8a3a, roughness: 0.7 });
 const birchLeafDarkMat = new THREE.MeshStandardMaterial({ color: 0x5a7a2a, roughness: 0.7 });
 
@@ -28,14 +31,105 @@ function seededRand(seed) {
     return ((s >>> 0) % 10000) / 10000;
 }
 
-// ── Pine: tall, narrow conifer silhouette (stacked cones) ──
-function createPine(group, s) {
-    const trunk = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.12 * s, 0.22 * s, 3.2 * s, 8),
-        pineTrunkMat
-    );
-    trunk.position.y = 1.6 * s;
+function wrapAngle(angle) {
+    return Math.atan2(Math.sin(angle), Math.cos(angle));
+}
+
+function createBarkTrunk({
+    height,
+    radiusTop,
+    radiusBottom,
+    material,
+    baseColor,
+    seed,
+    radialSegments = 10,
+    heightSegments = 8,
+    stripeStrength = 0,
+}) {
+    const geometry = new THREE.CylinderGeometry(radiusTop, radiusBottom, height, radialSegments, heightSegments);
+    const pos = geometry.attributes.position;
+    const colors = new Float32Array(pos.count * 3);
+    const color = new THREE.Color();
+    const ridgeFreq = 4 + Math.floor(seededRand(seed + 11) * 4);
+    const ridgeAmp = 0.025 + seededRand(seed + 21) * 0.045;
+    const warpAmp = 0.01 + seededRand(seed + 31) * 0.02;
+    const baseFlare = 0.04 + seededRand(seed + 41) * 0.08;
+    const knotAngle = seededRand(seed + 51) * Math.PI * 2;
+    const knotHeight = 0.22 + seededRand(seed + 61) * 0.52;
+    const knotWidth = 0.2 + seededRand(seed + 71) * 0.15;
+    const knotStrength = 0.03 + seededRand(seed + 81) * 0.05;
+    const twist = seededRand(seed + 91) * Math.PI * 2;
+    const stripeFreq = 7 + Math.floor(seededRand(seed + 101) * 4);
+
+    for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const y = pos.getY(i);
+        const z = pos.getZ(i);
+        const radial = Math.sqrt(x * x + z * z);
+        const yNorm = (y + height * 0.5) / height;
+
+        let shade = 0.94;
+
+        if (radial > 0.0001) {
+            const theta = Math.atan2(z, x);
+            const barkWave =
+                Math.sin(theta * ridgeFreq + yNorm * 11 + twist) * ridgeAmp +
+                Math.sin(theta * (ridgeFreq * 2 + 1) - yNorm * 19 + twist * 0.6) * ridgeAmp * 0.45;
+            const verticalWarp = Math.sin(yNorm * Math.PI * (2.5 + seededRand(seed + 111)) + twist) * warpAmp;
+            const flare = Math.pow(1 - yNorm, 2) * baseFlare;
+            const knotTheta = wrapAngle(theta - knotAngle);
+            const knotDy = (yNorm - knotHeight) / knotWidth;
+            const knot = Math.exp(-(knotTheta * knotTheta) / 0.08 - knotDy * knotDy);
+            const radiusScale = 1 + barkWave + verticalWarp + flare + knot * knotStrength;
+
+            pos.setXYZ(i, x * radiusScale, y, z * radiusScale);
+
+            shade += barkWave * 1.9;
+            shade -= flare * 1.4;
+            shade += knot * 0.2;
+
+            if (stripeStrength > 0) {
+                const stripe = Math.sin(yNorm * stripeFreq * Math.PI + theta * 0.35 + twist) * 0.5 + 0.5;
+                shade -= smoothstep(0.56, 0.9, stripe) * stripeStrength;
+            }
+        } else if (stripeStrength > 0) {
+            const stripe = Math.sin(yNorm * stripeFreq * Math.PI + twist) * 0.5 + 0.5;
+            shade -= smoothstep(0.56, 0.9, stripe) * stripeStrength * 0.8;
+        }
+
+        const heightLight = 0.92 + yNorm * 0.12;
+        color.copy(baseColor).multiplyScalar(THREE.MathUtils.clamp(shade * heightLight, 0.45, 1.18));
+        colors[i * 3] = color.r;
+        colors[i * 3 + 1] = color.g;
+        colors[i * 3 + 2] = color.b;
+    }
+
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.computeVertexNormals();
+
+    const trunk = new THREE.Mesh(geometry, material);
     trunk.castShadow = true;
+    return trunk;
+}
+
+function smoothstep(edge0, edge1, value) {
+    const t = THREE.MathUtils.clamp((value - edge0) / (edge1 - edge0), 0, 1);
+    return t * t * (3 - 2 * t);
+}
+
+// ── Pine: tall, narrow conifer silhouette (stacked cones) ──
+function createPine(group, s, seed) {
+    const trunk = createBarkTrunk({
+        height: 3.2 * s,
+        radiusTop: 0.12 * s,
+        radiusBottom: 0.22 * s,
+        material: pineTrunkMat,
+        baseColor: pineTrunkColor,
+        seed: seed + 101,
+        radialSegments: 10,
+        heightSegments: 9,
+    });
+    trunk.position.y = 1.6 * s;
     group.add(trunk);
 
     const f0 = new THREE.Mesh(new THREE.ConeGeometry(1.3 * s, 2.2 * s, 8), pineLeafDarkMat);
@@ -49,13 +143,18 @@ function createPine(group, s) {
 }
 
 // ── Oak: shorter, wider, rounder canopy (stacked spheres) ──
-function createOak(group, s) {
-    const trunk = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.18 * s, 0.3 * s, 2.6 * s, 8),
-        oakTrunkMat
-    );
+function createOak(group, s, seed) {
+    const trunk = createBarkTrunk({
+        height: 2.6 * s,
+        radiusTop: 0.18 * s,
+        radiusBottom: 0.3 * s,
+        material: oakTrunkMat,
+        baseColor: oakTrunkColor,
+        seed: seed + 211,
+        radialSegments: 10,
+        heightSegments: 8,
+    });
     trunk.position.y = 1.3 * s;
-    trunk.castShadow = true;
     group.add(trunk);
 
     const canopy0 = new THREE.Mesh(new THREE.SphereGeometry(1.4 * s, 8, 6), oakLeafDarkMat);
@@ -69,13 +168,19 @@ function createOak(group, s) {
 }
 
 // ── Birch: slender, tall trunk with lighter, sparser foliage ──
-function createBirch(group, s) {
-    const trunk = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.08 * s, 0.14 * s, 3.6 * s, 8),
-        birchTrunkMat
-    );
+function createBirch(group, s, seed) {
+    const trunk = createBarkTrunk({
+        height: 3.6 * s,
+        radiusTop: 0.08 * s,
+        radiusBottom: 0.14 * s,
+        material: birchTrunkMat,
+        baseColor: birchTrunkColor,
+        seed: seed + 307,
+        radialSegments: 10,
+        heightSegments: 10,
+        stripeStrength: 0.22,
+    });
     trunk.position.y = 1.8 * s;
-    trunk.castShadow = true;
     group.add(trunk);
 
     const f0 = new THREE.Mesh(new THREE.ConeGeometry(0.9 * s, 2.4 * s, 7), birchLeafDarkMat);
@@ -105,9 +210,9 @@ function createTree(scene, x, z, seed, groundY) {
     const s = (0.8 + Math.abs(Math.sin(seed)) * 0.8) * 5.5;
     const species = pickSpecies(x, z, seed);
 
-    if (species === BIOME.OAK_FOREST) createOak(group, s);
-    else if (species === BIOME.BIRCH_FOREST) createBirch(group, s);
-    else createPine(group, s);
+    if (species === BIOME.OAK_FOREST) createOak(group, s, seed);
+    else if (species === BIOME.BIRCH_FOREST) createBirch(group, s, seed);
+    else createPine(group, s, seed);
 
     group.position.set(x, groundY + getHeight(x, z) - 0.4 * s, z);
     group.rotation.y = seed * 1.7;
@@ -178,5 +283,10 @@ export function spawnChunkTrees(scene, cx, cz, chunkSizeX, chunkSizeZ, groundY) 
 
 export function removeChunkTrees(scene, trees) {
     removeCollidersInChunk(trees);
-    trees.forEach(t => scene.remove(t));
+    trees.forEach((tree) => {
+        tree.traverse((child) => {
+            if (child.geometry) child.geometry.dispose();
+        });
+        scene.remove(tree);
+    });
 }

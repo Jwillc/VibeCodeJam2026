@@ -7,14 +7,17 @@ import { updateActionMenu, setActionCallback } from './actionMenu.js';
 import { resolveCollision } from './collision.js';
 import { getHeight, getUphillFactor, isTooSteep, applyTerrainToChunk, TERRAIN_SEGS } from './terrain.js';
 import { spawnChunkTrees, removeChunkTrees } from './trees.js';
-import { spawnChunkLakes, removeChunkLakes, isLake, updateLakes } from './lakes.js';
+import { spawnChunkLakes, removeChunkLakes, isLake, setLakeAtmosphere, updateLakes } from './lakes.js';
 
 // ── Scene setup ────────────────────────────────────────────────────
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
 scene.fog = new THREE.Fog(0x87ceeb, 60, 150);
 
-const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 200);
+const BASE_FOV = 50;
+const MOVE_FOV = 53;
+const SPRINT_FOV = 58;
+const camera = new THREE.PerspectiveCamera(BASE_FOV, window.innerWidth / window.innerHeight, 0.1, 200);
 const CAM_DISTANCE = 19;       // distance from player (before zoom)
 const CAM_HEIGHT = 6;          // height above player
 const CAM_ZOOM_STEPS = 8;
@@ -30,6 +33,9 @@ camera.lookAt(0, 2, 0);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(window.devicePixelRatio);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.prepend(renderer.domElement);
@@ -83,6 +89,78 @@ dirLight.shadow.camera.right = 30;
 dirLight.shadow.camera.top = 20;
 dirLight.shadow.camera.bottom = -10;
 scene.add(dirLight);
+scene.add(dirLight.target);
+
+// Atmosphere state
+const atmosphereState = {
+    sunAmount: 1,
+    skyTop: new THREE.Color(0x87ceeb),
+    skyHorizon: new THREE.Color(0xf2d8a8),
+    hazeColor: new THREE.Color(0xb8c4cf),
+    sunDirection: new THREE.Vector3(0.25, 0.95, 0.2),
+    lightDirection: new THREE.Vector3(0.25, 0.95, 0.2),
+};
+
+const skyDome = new THREE.Mesh(
+    new THREE.SphereGeometry(180, 32, 20),
+    new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        depthWrite: false,
+        fog: false,
+        uniforms: {
+            uTopColor: { value: atmosphereState.skyTop.clone() },
+            uHorizonColor: { value: atmosphereState.skyHorizon.clone() },
+            uLowerColor: { value: atmosphereState.hazeColor.clone() },
+            uSunColor: { value: new THREE.Color(0xfff1c2) },
+            uMoonColor: { value: new THREE.Color(0x9ab8ff) },
+            uSunDir: { value: atmosphereState.sunDirection.clone() },
+            uSunAmount: { value: 1 },
+        },
+        vertexShader: `
+            varying vec3 vWorldPos;
+            void main() {
+                vec4 worldPos = modelMatrix * vec4(position, 1.0);
+                vWorldPos = worldPos.xyz;
+                gl_Position = projectionMatrix * viewMatrix * worldPos;
+            }
+        `,
+        fragmentShader: `
+            uniform vec3 uTopColor;
+            uniform vec3 uHorizonColor;
+            uniform vec3 uLowerColor;
+            uniform vec3 uSunColor;
+            uniform vec3 uMoonColor;
+            uniform vec3 uSunDir;
+            uniform float uSunAmount;
+            varying vec3 vWorldPos;
+
+            void main() {
+                vec3 dir = normalize(vWorldPos - cameraPosition);
+                float height = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
+                float horizonBand = smoothstep(0.0, 0.28, height);
+                vec3 col = mix(uLowerColor, uHorizonColor, horizonBand);
+                col = mix(col, uTopColor, smoothstep(0.24, 0.95, height));
+
+                float horizonGlow = pow(1.0 - min(abs(dir.y) * 1.4, 1.0), 3.0);
+                col += uHorizonColor * horizonGlow * (0.12 + uSunAmount * 0.08);
+
+                vec3 sunDir = normalize(uSunDir);
+                float sunDot = max(dot(dir, sunDir), 0.0);
+                float sunHalo = pow(sunDot, 18.0);
+                float sunCore = pow(sunDot, 260.0);
+                col += uSunColor * (sunHalo * 0.25 + sunCore * 1.15);
+
+                float moonDot = max(dot(dir, -sunDir), 0.0);
+                float moonHalo = pow(moonDot, 28.0);
+                float moonCore = pow(moonDot, 320.0);
+                col += uMoonColor * (moonHalo * 0.08 + moonCore * 0.3) * (1.0 - uSunAmount);
+
+                gl_FragColor = vec4(col, 1.0);
+            }
+        `
+    })
+);
+scene.add(skyDome);
 
 // ── Materials ──────────────────────────────────────────────────────
 const darkMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8 });
@@ -537,18 +615,37 @@ const NIGHT_DURATION = 10 * 60; // 10 minutes in seconds
 const CYCLE_DURATION = DAY_DURATION + NIGHT_DURATION; // 70 minutes total
 const TRANSITION = 0.05; // fraction of cycle for dawn/dusk transitions
 
-const dayColor = new THREE.Color(0x87ceeb);
-const sunsetColor = new THREE.Color(0xd4956a);
-const nightColor = new THREE.Color(0x0a0e1a);
+const dayTopColor = new THREE.Color(0x6ebbf6);
+const dayHorizonColor = new THREE.Color(0xf4d8a2);
+const dayHazeColor = new THREE.Color(0xc0d1d5);
+const sunsetTopColor = new THREE.Color(0x5f75c6);
+const sunsetHorizonColor = new THREE.Color(0xf09b65);
+const sunsetHazeColor = new THREE.Color(0xc79b7c);
+const nightTopColor = new THREE.Color(0x07101d);
+const nightHorizonColor = new THREE.Color(0x18253d);
+const nightHazeColor = new THREE.Color(0x243249);
 
-const dayDirColor = new THREE.Color(0xfff8e7);
-const sunsetDirColor = new THREE.Color(0xff8844);
-const nightDirColor = new THREE.Color(0x223366);
+const dayDirColor = new THREE.Color(0xfff4dd);
+const sunsetDirColor = new THREE.Color(0xffae73);
+const nightDirColor = new THREE.Color(0x6f8bcf);
+const sunGlowColor = new THREE.Color(0xffe0a6);
+const moonGlowColor = new THREE.Color(0xa6c8ff);
+const cloudDayColor = new THREE.Color(0xf3eee5);
+const cloudDayShadow = new THREE.Color(0xb1b8c8);
+const cloudSunsetColor = new THREE.Color(0xffcfb2);
+const cloudSunsetShadow = new THREE.Color(0x8d6f7d);
+const cloudNightColor = new THREE.Color(0x42506d);
+const cloudNightShadow = new THREE.Color(0x263044);
+
+const scratchSkyColor = new THREE.Color();
+const scratchHorizonColor = new THREE.Color();
+const scratchHazeColor = new THREE.Color();
+const scratchCloudLight = new THREE.Color();
+const scratchCloudDark = new THREE.Color();
 
 function updateDayNight(elapsed) {
     const t = (elapsed % CYCLE_DURATION) / CYCLE_DURATION;
     const dayEnd = DAY_DURATION / CYCLE_DURATION;       // ~0.857
-    const nightStart = dayEnd;
     const nightEnd = 1.0;
 
     let sunAmount; // 1 = full day, 0 = full night
@@ -569,19 +666,50 @@ function updateDayNight(elapsed) {
     // Smooth the transition
     sunAmount = sunAmount * sunAmount * (3 - 2 * sunAmount);
 
-    // Sky & fog color
-    const skyColor = new THREE.Color();
+    const duskAmount = 1 - Math.abs(sunAmount - 0.5) / 0.5;
+
+    // Sky palette
     if (sunAmount > 0.5) {
-        skyColor.lerpColors(sunsetColor, dayColor, (sunAmount - 0.5) * 2);
+        const blend = (sunAmount - 0.5) * 2;
+        scratchSkyColor.lerpColors(sunsetTopColor, dayTopColor, blend);
+        scratchHorizonColor.lerpColors(sunsetHorizonColor, dayHorizonColor, blend);
+        scratchHazeColor.lerpColors(sunsetHazeColor, dayHazeColor, blend);
     } else {
-        skyColor.lerpColors(nightColor, sunsetColor, sunAmount * 2);
+        const blend = sunAmount * 2;
+        scratchSkyColor.lerpColors(nightTopColor, sunsetTopColor, blend);
+        scratchHorizonColor.lerpColors(nightHorizonColor, sunsetHorizonColor, blend);
+        scratchHazeColor.lerpColors(nightHazeColor, sunsetHazeColor, blend);
     }
-    scene.background.copy(skyColor);
-    scene.fog.color.copy(skyColor);
+
+    atmosphereState.sunAmount = sunAmount;
+    atmosphereState.skyTop.copy(scratchSkyColor);
+    atmosphereState.skyHorizon.copy(scratchHorizonColor);
+    atmosphereState.hazeColor.copy(scratchHazeColor);
+
+    const azimuth = elapsed * 0.03;
+    const sunHeight = THREE.MathUtils.lerp(-0.3, 0.95, sunAmount);
+    const horizonRadius = Math.sqrt(Math.max(0, 1 - sunHeight * sunHeight));
+    atmosphereState.sunDirection.set(
+        Math.cos(azimuth) * horizonRadius,
+        sunHeight,
+        Math.sin(azimuth) * horizonRadius * 0.7
+    ).normalize();
+    atmosphereState.lightDirection.copy(sunAmount > 0.22 ? atmosphereState.sunDirection : atmosphereState.sunDirection.clone().multiplyScalar(-1));
+
+    scene.background.copy(atmosphereState.skyTop);
+    scene.fog.color.copy(atmosphereState.hazeColor);
+
+    skyDome.material.uniforms.uTopColor.value.copy(atmosphereState.skyTop);
+    skyDome.material.uniforms.uHorizonColor.value.copy(atmosphereState.skyHorizon);
+    skyDome.material.uniforms.uLowerColor.value.copy(atmosphereState.hazeColor);
+    skyDome.material.uniforms.uSunColor.value.lerpColors(moonGlowColor, sunGlowColor, sunAmount);
+    skyDome.material.uniforms.uMoonColor.value.copy(moonGlowColor);
+    skyDome.material.uniforms.uSunDir.value.copy(atmosphereState.sunDirection);
+    skyDome.material.uniforms.uSunAmount.value = sunAmount;
 
     // Lighting
-    ambientLight.intensity = THREE.MathUtils.lerp(0.08, 0.6, sunAmount);
-    dirLight.intensity = THREE.MathUtils.lerp(0.05, 0.8, sunAmount);
+    ambientLight.intensity = THREE.MathUtils.lerp(0.12, 0.68, sunAmount);
+    dirLight.intensity = THREE.MathUtils.lerp(0.08, 0.92, sunAmount);
 
     if (sunAmount > 0.5) {
         dirLight.color.lerpColors(sunsetDirColor, dayDirColor, (sunAmount - 0.5) * 2);
@@ -589,9 +717,23 @@ function updateDayNight(elapsed) {
         dirLight.color.lerpColors(nightDirColor, sunsetDirColor, sunAmount * 2);
     }
 
-    // Fog distance - closer at night for atmosphere
-    scene.fog.near = THREE.MathUtils.lerp(10, 60, sunAmount);
-    scene.fog.far = THREE.MathUtils.lerp(35, 150, sunAmount);
+    // Fog distance - closer at night, warmer near dusk
+    scene.fog.near = THREE.MathUtils.lerp(12, 54, sunAmount);
+    scene.fog.far = THREE.MathUtils.lerp(70, 165, sunAmount) - duskAmount * 12;
+
+    if (sunAmount > 0.5) {
+        const blend = (sunAmount - 0.5) * 2;
+        scratchCloudLight.lerpColors(cloudSunsetColor, cloudDayColor, blend);
+        scratchCloudDark.lerpColors(cloudSunsetShadow, cloudDayShadow, blend);
+    } else {
+        const blend = sunAmount * 2;
+        scratchCloudLight.lerpColors(cloudNightColor, cloudSunsetColor, blend);
+        scratchCloudDark.lerpColors(cloudNightShadow, cloudSunsetShadow, blend);
+    }
+    cloudMat.color.copy(scratchCloudLight);
+    cloudDarkMat.color.copy(scratchCloudDark);
+
+    setLakeAtmosphere(atmosphereState.skyTop, atmosphereState.skyHorizon, sunAmount);
 }
 
 // ── Action callbacks ──────────────────────────────────────────────
@@ -681,9 +823,6 @@ function update() {
     // Procedural ground
     updateGroundChunks(player.position.x, player.position.z);
 
-    // Animate water surfaces
-    updateLakes(time);
-
     // Camera follow with orbit and zoom
     const orbitDist = CAM_DISTANCE * camZoom;
     const orbitHeight = CAM_HEIGHT * camZoom;
@@ -698,18 +837,42 @@ function update() {
     if (targetCamPos.y < minCamY) targetCamPos.y = minCamY;
     // Snap orbit rotation instantly; only lerp the follow offset for smooth walking
     const followLerp = Math.min(1, 8 * dt);
+    const previousCamY = camera.position.y;
     camera.position.copy(targetCamPos);
     // Smooth only the vertical (terrain bumps) by blending Y
-    camera.position.y = THREE.MathUtils.lerp(camera.position.y, targetCamPos.y, followLerp);
+    camera.position.y = THREE.MathUtils.lerp(previousCamY, targetCamPos.y, followLerp);
     camera.lookAt(player.position.x, player.position.y + 4, player.position.z);
 
-    // Light follows player
-    dirLight.position.set(player.position.x + 5, player.position.y + 17, player.position.z + 10);
-    dirLight.target.position.set(player.position.x, player.position.y, player.position.z);
-    dirLight.target.updateMatrixWorld();
+    const speed = Math.sqrt(pd.vx * pd.vx + pd.vz * pd.vz);
+    const speedPct = THREE.MathUtils.clamp(speed / (PLAYER_SPEED * 1.8), 0, 1);
+    const sprintPct = isSprinting() ? 1 : 0;
+    const targetFov = THREE.MathUtils.lerp(
+        THREE.MathUtils.lerp(BASE_FOV, MOVE_FOV, speedPct),
+        SPRINT_FOV,
+        sprintPct
+    );
+    const newFov = THREE.MathUtils.lerp(camera.fov, targetFov, Math.min(1, dt * 4));
+    if (Math.abs(newFov - camera.fov) > 0.01) {
+        camera.fov = newFov;
+        camera.updateProjectionMatrix();
+    }
+
+    skyDome.position.copy(camera.position);
 
     // Day/night cycle
     updateDayNight(time);
+
+    // Light follows the atmosphere direction
+    dirLight.position.set(
+        player.position.x + atmosphereState.lightDirection.x * 24,
+        player.position.y + Math.max(8, atmosphereState.lightDirection.y * 24),
+        player.position.z + atmosphereState.lightDirection.z * 24
+    );
+    dirLight.target.position.set(player.position.x, player.position.y, player.position.z);
+    dirLight.target.updateMatrixWorld();
+
+    // Animate water surfaces
+    updateLakes(time);
 
     // Clouds drift at fixed world height, follow player horizontally
     clouds.forEach((c, i) => {
