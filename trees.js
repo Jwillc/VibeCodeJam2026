@@ -7,20 +7,26 @@ import { isLakeZone } from './terrain.js';
 // ── Pine materials (dark conifer greens) ──
 const pineTrunkColor = new THREE.Color(0x3a2a1a);
 const pineTrunkMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, vertexColors: true });
-const pineLeafMat = new THREE.MeshStandardMaterial({ color: 0x4a6a2a, roughness: 0.8 });
-const pineLeafDarkMat = new THREE.MeshStandardMaterial({ color: 0x3a5a1a, roughness: 0.8 });
+const pineLeafColor = new THREE.Color(0x4a6a2a);
+const pineLeafDarkColor = new THREE.Color(0x3a5a1a);
+const pineLeafMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, vertexColors: true });
+const pineLeafDarkMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, vertexColors: true });
 
 // ── Oak materials (warmer greens, browner trunk) ──
 const oakTrunkColor = new THREE.Color(0x4a3520);
 const oakTrunkMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, vertexColors: true });
-const oakLeafMat = new THREE.MeshStandardMaterial({ color: 0x5a7a30, roughness: 0.75 });
-const oakLeafDarkMat = new THREE.MeshStandardMaterial({ color: 0x4a6820, roughness: 0.75 });
+const oakLeafColor = new THREE.Color(0x5a7a30);
+const oakLeafDarkColor = new THREE.Color(0x4a6820);
+const oakLeafMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.75, vertexColors: true });
+const oakLeafDarkMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.75, vertexColors: true });
 
 // ── Birch materials (pale trunk, lighter greens) ──
 const birchTrunkColor = new THREE.Color(0xc8b89a);
 const birchTrunkMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7, vertexColors: true });
-const birchLeafMat = new THREE.MeshStandardMaterial({ color: 0x6a8a3a, roughness: 0.7 });
-const birchLeafDarkMat = new THREE.MeshStandardMaterial({ color: 0x5a7a2a, roughness: 0.7 });
+const birchLeafColor = new THREE.Color(0x6a8a3a);
+const birchLeafDarkColor = new THREE.Color(0x5a7a2a);
+const birchLeafMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7, vertexColors: true });
+const birchLeafDarkMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7, vertexColors: true });
 
 function seededRand(seed) {
     // Integer hash that works well with negative seeds
@@ -117,6 +123,117 @@ function smoothstep(edge0, edge1, value) {
     return t * t * (3 - 2 * t);
 }
 
+function createLeafCone({
+    radius,
+    height,
+    material,
+    baseColor,
+    seed,
+    radialSegments = 8,
+    heightSegments = 4,
+}) {
+    const geometry = new THREE.ConeGeometry(radius, height, radialSegments, heightSegments);
+    const pos = geometry.attributes.position;
+    const colors = new Float32Array(pos.count * 3);
+    const color = new THREE.Color();
+    const phase = seededRand(seed + 401) * Math.PI * 2;
+    const lobeFreq = 3 + Math.floor(seededRand(seed + 411) * 3);
+    const ridgeAmp = 0.03 + seededRand(seed + 421) * 0.05;
+    const bulgeAmp = 0.05 + seededRand(seed + 431) * 0.05;
+    const leanX = (seededRand(seed + 441) - 0.5) * radius * 0.08;
+    const leanZ = (seededRand(seed + 451) - 0.5) * radius * 0.08;
+
+    for (let i = 0; i < pos.count; i++) {
+        let x = pos.getX(i);
+        const y = pos.getY(i);
+        let z = pos.getZ(i);
+        const radial = Math.sqrt(x * x + z * z);
+        const yNorm = (y + height * 0.5) / height;
+        let shade = 0.92;
+
+        if (radial > 0.0001) {
+            const theta = Math.atan2(z, x);
+            const lobe =
+                Math.sin(theta * lobeFreq + yNorm * 8 + phase) * ridgeAmp +
+                Math.sin(theta * (lobeFreq + 2) - yNorm * 13 + phase * 0.7) * ridgeAmp * 0.45;
+            const bulge = Math.sin(yNorm * Math.PI) * bulgeAmp;
+            const taper = 0.35 + (1 - yNorm) * 0.8;
+            const radiusScale = 1 + lobe * taper + bulge * 0.35;
+            x = x * radiusScale + leanX * yNorm;
+            z = z * radiusScale + leanZ * yNorm;
+            pos.setXYZ(i, x, y, z);
+
+            shade += lobe * 1.2;
+            shade += bulge * 0.5;
+        }
+
+        const topLight = 0.82 + yNorm * 0.26;
+        color.copy(baseColor).multiplyScalar(THREE.MathUtils.clamp(shade * topLight, 0.5, 1.18));
+        colors[i * 3] = color.r;
+        colors[i * 3 + 1] = color.g;
+        colors[i * 3 + 2] = color.b;
+    }
+
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.computeVertexNormals();
+
+    const foliage = new THREE.Mesh(geometry, material);
+    foliage.castShadow = true;
+    return foliage;
+}
+
+function createLeafSphere({
+    radius,
+    material,
+    baseColor,
+    seed,
+    widthSegments = 8,
+    heightSegments = 6,
+}) {
+    const geometry = new THREE.SphereGeometry(radius, widthSegments, heightSegments);
+    const pos = geometry.attributes.position;
+    const colors = new Float32Array(pos.count * 3);
+    const color = new THREE.Color();
+    const phase = seededRand(seed + 501) * Math.PI * 2;
+    const lobeFreq = 4 + Math.floor(seededRand(seed + 511) * 3);
+    const puffAmp = 0.045 + seededRand(seed + 521) * 0.055;
+    const dentAmp = 0.02 + seededRand(seed + 531) * 0.03;
+
+    for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const y = pos.getY(i);
+        const z = pos.getZ(i);
+        const len = Math.sqrt(x * x + y * y + z * z);
+        const nx = len > 0.0001 ? x / len : 0;
+        const ny = len > 0.0001 ? y / len : 1;
+        const nz = len > 0.0001 ? z / len : 0;
+        const theta = Math.atan2(z, x);
+        const yNorm = ny * 0.5 + 0.5;
+
+        const lobe =
+            Math.sin(theta * lobeFreq + yNorm * 7 + phase) * puffAmp +
+            Math.sin(theta * (lobeFreq + 3) - yNorm * 11 + phase * 0.6) * puffAmp * 0.45;
+        const crown = Math.sin(yNorm * Math.PI) * puffAmp * 0.7;
+        const undersideDent = Math.pow(1 - yNorm, 2) * dentAmp;
+        const radiusScale = 1 + lobe + crown - undersideDent;
+
+        pos.setXYZ(i, nx * radius * radiusScale, ny * radius * radiusScale, nz * radius * radiusScale);
+
+        const shade = 0.88 + lobe * 0.9 + yNorm * 0.18 - undersideDent * 0.8;
+        color.copy(baseColor).multiplyScalar(THREE.MathUtils.clamp(shade, 0.5, 1.16));
+        colors[i * 3] = color.r;
+        colors[i * 3 + 1] = color.g;
+        colors[i * 3 + 2] = color.b;
+    }
+
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.computeVertexNormals();
+
+    const foliage = new THREE.Mesh(geometry, material);
+    foliage.castShadow = true;
+    return foliage;
+}
+
 // ── Pine: tall, narrow conifer silhouette (stacked cones) ──
 function createPine(group, s, seed) {
     const trunk = createBarkTrunk({
@@ -132,14 +249,38 @@ function createPine(group, s, seed) {
     trunk.position.y = 1.6 * s;
     group.add(trunk);
 
-    const f0 = new THREE.Mesh(new THREE.ConeGeometry(1.3 * s, 2.2 * s, 8), pineLeafDarkMat);
-    f0.position.y = 3.6 * s; f0.castShadow = true; group.add(f0);
+    const f0 = createLeafCone({
+        radius: 1.3 * s,
+        height: 2.2 * s,
+        material: pineLeafDarkMat,
+        baseColor: pineLeafDarkColor,
+        seed: seed + 601,
+        radialSegments: 8,
+        heightSegments: 5,
+    });
+    f0.position.y = 3.6 * s; group.add(f0);
 
-    const f1 = new THREE.Mesh(new THREE.ConeGeometry(1.0 * s, 1.8 * s, 8), pineLeafMat);
-    f1.position.y = 4.5 * s; f1.castShadow = true; group.add(f1);
+    const f1 = createLeafCone({
+        radius: 1.0 * s,
+        height: 1.8 * s,
+        material: pineLeafMat,
+        baseColor: pineLeafColor,
+        seed: seed + 617,
+        radialSegments: 8,
+        heightSegments: 5,
+    });
+    f1.position.y = 4.5 * s; group.add(f1);
 
-    const f2 = new THREE.Mesh(new THREE.ConeGeometry(0.6 * s, 1.4 * s, 7), pineLeafDarkMat);
-    f2.position.y = 5.3 * s; f2.castShadow = true; group.add(f2);
+    const f2 = createLeafCone({
+        radius: 0.6 * s,
+        height: 1.4 * s,
+        material: pineLeafDarkMat,
+        baseColor: pineLeafDarkColor,
+        seed: seed + 633,
+        radialSegments: 7,
+        heightSegments: 4,
+    });
+    f2.position.y = 5.3 * s; group.add(f2);
 }
 
 // ── Oak: shorter, wider, rounder canopy (stacked spheres) ──
@@ -157,14 +298,35 @@ function createOak(group, s, seed) {
     trunk.position.y = 1.3 * s;
     group.add(trunk);
 
-    const canopy0 = new THREE.Mesh(new THREE.SphereGeometry(1.4 * s, 8, 6), oakLeafDarkMat);
-    canopy0.position.y = 3.4 * s; canopy0.castShadow = true; group.add(canopy0);
+    const canopy0 = createLeafSphere({
+        radius: 1.4 * s,
+        material: oakLeafDarkMat,
+        baseColor: oakLeafDarkColor,
+        seed: seed + 701,
+        widthSegments: 8,
+        heightSegments: 6,
+    });
+    canopy0.position.y = 3.4 * s; group.add(canopy0);
 
-    const canopy1 = new THREE.Mesh(new THREE.SphereGeometry(1.1 * s, 8, 6), oakLeafMat);
-    canopy1.position.y = 4.1 * s; canopy1.castShadow = true; group.add(canopy1);
+    const canopy1 = createLeafSphere({
+        radius: 1.1 * s,
+        material: oakLeafMat,
+        baseColor: oakLeafColor,
+        seed: seed + 719,
+        widthSegments: 8,
+        heightSegments: 6,
+    });
+    canopy1.position.y = 4.1 * s; group.add(canopy1);
 
-    const canopy2 = new THREE.Mesh(new THREE.SphereGeometry(0.7 * s, 7, 5), oakLeafDarkMat);
-    canopy2.position.y = 4.6 * s; canopy2.castShadow = true; group.add(canopy2);
+    const canopy2 = createLeafSphere({
+        radius: 0.7 * s,
+        material: oakLeafDarkMat,
+        baseColor: oakLeafDarkColor,
+        seed: seed + 733,
+        widthSegments: 7,
+        heightSegments: 5,
+    });
+    canopy2.position.y = 4.6 * s; group.add(canopy2);
 }
 
 // ── Birch: slender, tall trunk with lighter, sparser foliage ──
@@ -183,14 +345,38 @@ function createBirch(group, s, seed) {
     trunk.position.y = 1.8 * s;
     group.add(trunk);
 
-    const f0 = new THREE.Mesh(new THREE.ConeGeometry(0.9 * s, 2.4 * s, 7), birchLeafDarkMat);
-    f0.position.y = 4.0 * s; f0.castShadow = true; group.add(f0);
+    const f0 = createLeafCone({
+        radius: 0.9 * s,
+        height: 2.4 * s,
+        material: birchLeafDarkMat,
+        baseColor: birchLeafDarkColor,
+        seed: seed + 801,
+        radialSegments: 7,
+        heightSegments: 5,
+    });
+    f0.position.y = 4.0 * s; group.add(f0);
 
-    const f1 = new THREE.Mesh(new THREE.ConeGeometry(0.65 * s, 1.8 * s, 7), birchLeafMat);
-    f1.position.y = 4.9 * s; f1.castShadow = true; group.add(f1);
+    const f1 = createLeafCone({
+        radius: 0.65 * s,
+        height: 1.8 * s,
+        material: birchLeafMat,
+        baseColor: birchLeafColor,
+        seed: seed + 817,
+        radialSegments: 7,
+        heightSegments: 4,
+    });
+    f1.position.y = 4.9 * s; group.add(f1);
 
-    const f2 = new THREE.Mesh(new THREE.ConeGeometry(0.4 * s, 1.2 * s, 6), birchLeafDarkMat);
-    f2.position.y = 5.6 * s; f2.castShadow = true; group.add(f2);
+    const f2 = createLeafCone({
+        radius: 0.4 * s,
+        height: 1.2 * s,
+        material: birchLeafDarkMat,
+        baseColor: birchLeafDarkColor,
+        seed: seed + 833,
+        radialSegments: 6,
+        heightSegments: 4,
+    });
+    f2.position.y = 5.6 * s; group.add(f2);
 }
 
 function pickSpecies(x, z, seed) {
