@@ -5,6 +5,19 @@ export function addCollider(x, z, radius) {
     colliders.push({ x, z, radius });
 }
 
+export function canPlaceCollider(x, z, radius, padding = 0) {
+    for (const c of colliders) {
+        const dx = x - c.x;
+        const dz = z - c.z;
+        const minDist = c.radius + radius + padding;
+        if (dx * dx + dz * dz < minDist * minDist) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 export function removeCollidersInChunk(trees) {
     for (const tree of trees) {
         const tx = tree.position.x;

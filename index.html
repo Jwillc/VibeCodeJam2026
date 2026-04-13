@@ -103,6 +103,57 @@
             margin-right: 6px;
             font-size: 10px;
         }
+        #build-menu {
+            display: none;
+            position: absolute;
+            right: 20px;
+            bottom: 20px;
+            min-width: 230px;
+            max-width: 280px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            background: rgba(0,0,0,0.58);
+            color: rgba(255,255,255,0.9);
+            font-family: 'Courier New', monospace;
+            text-shadow: 1px 1px 0 #000;
+            z-index: 6;
+        }
+        .build-menu-title {
+            font-size: 13px;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+        .build-menu-subtitle,
+        .build-menu-empty {
+            font-size: 11px;
+            color: rgba(255,255,255,0.65);
+            margin-bottom: 8px;
+        }
+        .build-menu-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .build-item {
+            padding: 5px 6px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .build-item.selected {
+            background: rgba(255,255,255,0.16);
+        }
+        .build-item-index {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            line-height: 18px;
+            text-align: center;
+            border-radius: 4px;
+            background: rgba(255,255,255,0.2);
+            margin-right: 8px;
+            font-size: 10px;
+            font-weight: bold;
+        }
         #controls-hint {
             position: absolute;
             bottom: 20px;
@@ -115,6 +166,125 @@
             text-shadow: 1px 1px 0 #000;
             pointer-events: none;
             white-space: nowrap;
+        }
+        #debug-readout {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 5;
+            min-width: 170px;
+            padding: 6px 8px;
+            border-radius: 6px;
+            background: rgba(0,0,0,0.55);
+            color: rgba(255,255,255,0.88);
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            font-weight: bold;
+            text-shadow: 1px 1px 0 #000;
+            white-space: pre-line;
+        }
+        #save-status {
+            position: absolute;
+            left: 20px;
+            bottom: 20px;
+            z-index: 6;
+            padding: 5px 8px;
+            border-radius: 6px;
+            background: rgba(0,0,0,0.45);
+            color: rgba(255,255,255,0.75);
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            font-weight: bold;
+            text-shadow: 1px 1px 0 #000;
+            pointer-events: none;
+        }
+        #save-status.error {
+            color: #ff9aa5;
+        }
+        #dev-console {
+            position: absolute;
+            left: 20px;
+            right: 20px;
+            bottom: 56px;
+            height: 220px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 12px;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 10px;
+            background: rgba(8,12,10,0.9);
+            color: #d9f7df;
+            font-family: 'Courier New', monospace;
+            z-index: 12;
+        }
+        #dev-console[hidden] {
+            display: none !important;
+        }
+        .dev-console-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .dev-console-title {
+            font-size: 12px;
+            font-weight: bold;
+            color: #8ef0aa;
+        }
+        #dev-console-close,
+        #dev-console-open {
+            border: 1px solid rgba(255,255,255,0.18);
+            border-radius: 6px;
+            background: rgba(0,0,0,0.35);
+            color: #f2fff4;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        #dev-console-close {
+            width: 28px;
+            height: 28px;
+            line-height: 26px;
+            text-align: center;
+            padding: 0;
+        }
+        #dev-console-open {
+            position: absolute;
+            right: 20px;
+            bottom: 20px;
+            z-index: 11;
+            padding: 6px 10px;
+        }
+        #dev-console-open[hidden] {
+            display: none !important;
+        }
+        #dev-console-output {
+            flex: 1;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            font-size: 12px;
+            line-height: 1.35;
+        }
+        #dev-console-input {
+            width: 100%;
+            border: 1px solid rgba(120,255,180,0.18);
+            border-radius: 6px;
+            padding: 8px 10px;
+            background: rgba(0,0,0,0.4);
+            color: #f2fff4;
+            font-family: inherit;
+            font-size: 12px;
+            outline: none;
+        }
+        .dev-console-line {
+            margin-bottom: 4px;
+        }
+        .dev-console-line.prompt {
+            color: #8ef0aa;
+        }
+        .dev-console-line.error {
+            color: #ff9aa5;
         }
     </style>
 </head>
@@ -138,7 +308,19 @@
         </div>
     </div>
     <div id="action-menu"></div>
-    <div id="controls-hint">A/D Move &bull; W/S Forward/Back &bull; Shift Sprint</div>
+    <div id="build-menu"></div>
+    <div id="controls-hint">A/D Move &bull; W/S Forward/Back &bull; Shift Sprint &bull; M Build &bull; Click Place &bull; Esc Cancel</div>
+    <div id="save-status">Village file: loading...</div>
+    <button id="dev-console-open" type="button" hidden>Console</button>
+    <div id="dev-console" hidden>
+        <div class="dev-console-header">
+            <div class="dev-console-title">Dev Console</div>
+            <button id="dev-console-close" type="button" aria-label="Close dev console">X</button>
+        </div>
+        <div id="dev-console-output"></div>
+        <input id="dev-console-input" type="text" spellcheck="false" autocomplete="off" placeholder="Type a dev command..." />
+    </div>
+    <div id="debug-readout" hidden></div>
 
     <script type="importmap">
     {

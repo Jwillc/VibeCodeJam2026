@@ -1,3 +1,6 @@
+import { isBuildMenuOpen } from './buildMenu.js';
+import { isDevConsoleOpen } from './devConsole.js';
+
 const container = document.getElementById('action-menu');
 let currentActions = [];
 let selectedIndex = 0;
@@ -20,7 +23,8 @@ export function updateActionMenu(actions) {
 }
 
 function render() {
-    if (currentActions.length === 0) {
+    if (!container) return;
+    if (currentActions.length === 0 || isBuildMenuOpen()) {
         container.style.display = 'none';
         return;
     }
@@ -32,6 +36,7 @@ function render() {
         return `<div class="action-item${sel}"><span class="action-key">${key}</span>${a.label}</div>`;
     }).join('');
 }
+window.addEventListener('buildmenuchange', render);
 
 function executeSelected() {
     if (currentActions.length === 0) return;
@@ -43,6 +48,8 @@ function executeSelected() {
 
 // Keyboard handling
 window.addEventListener('keydown', (e) => {
+    if (isDevConsoleOpen()) return;
+    if (isBuildMenuOpen()) return;
     if (currentActions.length === 0) return;
 
     // Number keys 1-9 to pick action directly

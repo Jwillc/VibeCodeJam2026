@@ -4,10 +4,21 @@ import { updateSprint, updateHUD, getStamina, isSprinting } from './playerStats.
 import { updateSurvival, updateSurvivalHUD, hydratePlayer } from './survival.js';
 import { detectActions } from './actionDetection.js';
 import { updateActionMenu, setActionCallback } from './actionMenu.js';
-import { resolveCollision } from './collision.js';
+import { setBuildMenuItems } from './buildMenu.js';
+import { canPlaceCollider, resolveCollision } from './collision.js';
 import { getHeight, getUphillFactor, isTooSteep, applyTerrainToChunk, TERRAIN_SEGS } from './terrain.js';
 import { spawnChunkTrees, removeChunkTrees } from './trees.js';
 import { spawnChunkLakes, removeChunkLakes, isLake, setLakeAtmosphere, updateLakes } from './lakes.js';
+import { createVillageAsset, PLACEABLE_ITEMS, spawnVillageLayout, spawnVillagePlacement } from './village.js';
+import { clearDevConsole, isDevConsoleOpen, logDevConsole, setDevConsoleCommandHandler } from './devConsole.js';
+import { DEV_MODE } from './devMode.js';
+import { loadVillageLayout, saveVillageLayout } from './villagePersistence.js';
+
+const {
+    layout: villageLayout,
+    source: villageLayoutSource,
+    fileName: villageFileName,
+} = await loadVillageLayout();
 
 // ── Scene setup ────────────────────────────────────────────────────
 const scene = new THREE.Scene();
@@ -38,21 +49,325 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.domElement.tabIndex = 0;
+renderer.domElement.style.outline = 'none';
 document.body.prepend(renderer.domElement);
+renderer.domElement.focus();
+renderer.domElement.addEventListener('pointerdown', () => {
+    renderer.domElement.focus();
+});
+
+const raycaster = new THREE.Raycaster();
+const pointerNdc = new THREE.Vector2(0, 0);
+const placementState = {
+    active: false,
+    item: null,
+    preview: null,
+    previewMaterials: [],
+    rotation: 0,
+    hit: null,
+    valid: false,
+};
+
+const saveStatus = document.getElementById('save-status');
+const debugReadout = document.getElementById('debug-readout');
+const controlsHint = document.getElementById('controls-hint');
+let showDebugCoords = false;
+
+function setSaveStatus(text, isError = false) {
+    if (!saveStatus) return;
+    saveStatus.textContent = text;
+    saveStatus.classList.toggle('error', isError);
+}
+
+if (controlsHint) {
+    controlsHint.innerHTML = DEV_MODE
+        ? 'A/D Move &bull; W/S Forward/Back &bull; Shift Sprint &bull; M Build &bull; Click Place &bull; Esc Cancel'
+        : 'A/D Move &bull; W/S Forward/Back &bull; Shift Sprint';
+}
+
+if (!DEV_MODE && saveStatus) {
+    saveStatus.hidden = true;
+} else if (villageLayoutSource === 'file') {
+    setSaveStatus(`Village source: ${villageFileName}`);
+} else if (villageLayoutSource === 'local') {
+    setSaveStatus('Village source: dev local autosave');
+} else if (villageLayoutSource === 'bundle') {
+    setSaveStatus(`Village source: ${villageFileName}`);
+} else {
+    setSaveStatus('Village source: default layout', true);
+}
+
+function updateDebugReadout() {
+    if (!showDebugCoords || !debugReadout) return;
+    debugReadout.textContent = [
+        `X: ${player.position.x.toFixed(2)}`,
+        `Y: ${player.position.y.toFixed(2)}`,
+        `Z: ${player.position.z.toFixed(2)}`
+    ].join('\n');
+}
+
+function setDebugCoordsVisible(visible) {
+    showDebugCoords = visible;
+    if (debugReadout) {
+        debugReadout.hidden = !visible;
+    }
+    updateDebugReadout();
+}
+
+function exportVillageLayoutText() {
+    return `${JSON.stringify(villageLayout, null, 2)}\n`;
+}
+
+async function bakeVillageLayout() {
+    const bakedText = exportVillageLayoutText();
+
+    let copied = false;
+    if (navigator.clipboard?.writeText) {
+        try {
+            await navigator.clipboard.writeText(bakedText);
+            copied = true;
+        } catch {
+            copied = false;
+        }
+    }
+
+    const blob = new Blob([bakedText], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'villageLayout.baked.json';
+    anchor.click();
+    URL.revokeObjectURL(url);
+
+    logDevConsole('Baked village layout ready.');
+    logDevConsole(copied ? 'Copied JSON to clipboard.' : 'Clipboard copy unavailable.');
+    logDevConsole('Downloaded `villageLayout.baked.json`.');
+}
+
+setDevConsoleCommandHandler(async (raw) => {
+    const command = raw.trim().toLowerCase();
+
+    if (command === 'help') {
+        return [
+            'help',
+            'coords on',
+            'coords off',
+            'coords',
+            'bake village',
+            'print village',
+            'clear',
+        ];
+    }
+
+    if (command === 'clear') {
+        clearDevConsole();
+        return '';
+    }
+
+    if (command === 'coords' || command === 'coords on') {
+        setDebugCoordsVisible(true);
+        return 'World coordinates readout enabled.';
+    }
+
+    if (command === 'coords off') {
+        setDebugCoordsVisible(false);
+        return 'World coordinates readout disabled.';
+    }
+
+    if (command === 'print village') {
+        logDevConsole(exportVillageLayoutText());
+        return 'Current village layout printed above.';
+    }
+
+    if (command === 'bake village') {
+        await bakeVillageLayout();
+        return 'Bake complete.';
+    }
+
+    return `Unknown command: ${raw}`;
+});
+
+function updatePointerFromEvent(e) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointerNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    pointerNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+}
+
+function disposePlacementPreview() {
+    if (!placementState.preview) return;
+    scene.remove(placementState.preview);
+    placementState.preview.traverse((obj) => {
+        if (obj.isMesh && obj.material?.dispose) {
+            obj.material.dispose();
+        }
+    });
+    placementState.preview = null;
+    placementState.previewMaterials = [];
+}
+
+function setPlacementTint(valid) {
+    const tint = valid ? 0x63ffb8 : 0xff6b7a;
+    placementState.previewMaterials.forEach((material) => material.color.setHex(tint));
+}
+
+function createBlueprintAsset(type) {
+    const asset = createVillageAsset(type);
+    if (!asset) return null;
+
+    const previewMaterials = [];
+    asset.traverse((obj) => {
+        if (!obj.isMesh) return;
+        const sourceMat = Array.isArray(obj.material) ? obj.material[0] : obj.material;
+        const previewMat = new THREE.MeshBasicMaterial({
+            color: 0x63ffb8,
+            transparent: true,
+            opacity: obj.geometry.type === 'CircleGeometry' ? 0.16 : 0.38,
+            depthWrite: false,
+            side: sourceMat?.side ?? THREE.DoubleSide,
+        });
+        obj.material = previewMat;
+        obj.castShadow = false;
+        obj.receiveShadow = false;
+        previewMaterials.push(previewMat);
+    });
+
+    asset.userData.previewMaterials = previewMaterials;
+    return asset;
+}
+
+function cancelPlacementMode() {
+    placementState.active = false;
+    placementState.item = null;
+    placementState.hit = null;
+    placementState.valid = false;
+    disposePlacementPreview();
+}
+
+function startPlacementMode(item) {
+    cancelPlacementMode();
+    const preview = createBlueprintAsset(item.id);
+    if (!preview) return;
+    placementState.active = true;
+    placementState.item = item;
+    placementState.preview = preview;
+    placementState.previewMaterials = preview.userData.previewMaterials ?? [];
+    placementState.rotation = camOrbitAngle;
+    scene.add(preview);
+}
+
+function getGroundMeshes() {
+    return Array.from(groundChunks.values(), (chunk) => chunk.top);
+}
+
+function updatePlacementPreview() {
+    if (!placementState.active || !placementState.preview) return;
+
+    const groundMeshes = getGroundMeshes();
+    if (groundMeshes.length === 0) {
+        placementState.preview.visible = false;
+        placementState.valid = false;
+        placementState.hit = null;
+        return;
+    }
+
+    raycaster.setFromCamera(pointerNdc, camera);
+    const hit = raycaster.intersectObjects(groundMeshes, false)[0];
+    if (!hit) {
+        placementState.preview.visible = false;
+        placementState.valid = false;
+        placementState.hit = null;
+        return;
+    }
+
+    const x = hit.point.x;
+    const z = hit.point.z;
+    const y = GROUND_Y + getHeight(x, z);
+    const radius = placementState.preview.userData.colliderRadius ?? 0;
+    const dx = x - player.position.x;
+    const dz = z - player.position.z;
+    const playerClearance = radius + 1.1;
+    const valid = canPlaceCollider(x, z, radius, 0.2) && (dx * dx + dz * dz) > playerClearance * playerClearance;
+
+    placementState.preview.visible = true;
+    placementState.preview.position.set(x, y, z);
+    placementState.preview.rotation.y = placementState.rotation;
+    placementState.hit = { x, y, z };
+    placementState.valid = valid;
+    setPlacementTint(valid);
+}
+
+async function placeSelectedAsset() {
+    if (!placementState.active || !placementState.item || !placementState.valid || !placementState.hit) return;
+
+    const placement = {
+        type: placementState.item.id,
+        x: placementState.hit.x,
+        y: placementState.hit.y,
+        z: placementState.hit.z,
+        rotation: placementState.rotation,
+    };
+
+    villageLayout.placements.push(placement);
+    spawnVillagePlacement(scene, placement, (x, z) => GROUND_Y + getHeight(x, z));
+
+    const saveResult = await saveVillageLayout(villageLayout);
+    if (saveResult.ok) {
+        if (saveResult.storage === 'file') {
+            setSaveStatus(`Village saved: ${saveResult.fileName}`);
+        } else {
+            setSaveStatus('Village saved locally for dev resets');
+        }
+    } else if (saveResult.reason === 'local-storage-failed') {
+        setSaveStatus('Village placement added, but local save failed', true);
+    } else {
+        setSaveStatus('Village placement added, but save failed', true);
+    }
+}
 
 // ── Mouse orbit controls ──
 let isOrbiting = false;
-renderer.domElement.addEventListener('mousedown', (e) => {
+renderer.domElement.addEventListener('mousedown', async (e) => {
+    if (isDevConsoleOpen()) return;
+    updatePointerFromEvent(e);
+
+    if (placementState.active) {
+        if (e.button === 0) {
+            await placeSelectedAsset();
+            e.preventDefault();
+            return;
+        }
+        if (e.button === 2) {
+            cancelPlacementMode();
+            e.preventDefault();
+            return;
+        }
+    }
+
     if (e.button === 2 || e.button === 0) {
         isOrbiting = true;
     }
 });
 window.addEventListener('mouseup', () => { isOrbiting = false; });
 window.addEventListener('mousemove', (e) => {
+    if (isDevConsoleOpen()) return;
+    updatePointerFromEvent(e);
     if (!isOrbiting) return;
     camOrbitAngle -= e.movementX * CAM_ORBIT_SPEED;
 });
 renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+window.addEventListener('builditemselected', (e) => {
+    if (!DEV_MODE) return;
+    if (e.detail?.item) {
+        startPlacementMode(e.detail.item);
+    }
+});
+window.addEventListener('buildmenuchange', (e) => {
+    if (!DEV_MODE) return;
+    if (e.detail?.open) {
+        cancelPlacementMode();
+    }
+});
 
 // ── Vignette ───────────────────────────────────────────────────────
 const vignetteScene = new THREE.Scene();
@@ -234,7 +549,7 @@ function createGroundChunk(cx, cz) {
     // Lakes for this chunk
     const lakes = spawnChunkLakes(scene, cx, cz, CHUNK_SIZE_X, CHUNK_SIZE_Z, GROUND_Y);
 
-    groundChunks.set(key, { ground: group, trees, lakes });
+    groundChunks.set(key, { ground: group, top, trees, lakes });
 }
 
 function updateGroundChunks(px, pz) {
@@ -505,7 +820,13 @@ function createSamurai() {
 
 // ── Player ─────────────────────────────────────────────────────────
 const player = createSamurai();
-player.position.set(0, GROUND_Y, 5);
+player.position.set(
+    villageLayout.center?.x ?? 90,
+    villageLayout.center?.y ?? 0.67,
+    villageLayout.center?.z ?? 65.65
+);
+setBuildMenuItems(PLACEABLE_ITEMS);
+spawnVillageLayout(scene, villageLayout.placements, (x, z) => GROUND_Y + getHeight(x, z));
 
 // Blob shadow under the player (flat planes don't cast real shadows well)
 const shadowTex = (() => {
@@ -544,8 +865,19 @@ window.addEventListener('mousedown', startBGM, { once: false });
 
 // ── Input ──────────────────────────────────────────────────────────
 const keys = {};
-window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
-window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+window.addEventListener('keydown', e => {
+    if (!DEV_MODE && !e.repeat && (e.code === 'Backquote' || e.key === '~' || e.key === '`')) {
+        setDebugCoordsVisible(!showDebugCoords);
+    } else if (DEV_MODE && placementState.active && e.key === 'Escape') {
+        cancelPlacementMode();
+    }
+    if (DEV_MODE && isDevConsoleOpen()) return;
+    keys[e.key.toLowerCase()] = true;
+});
+window.addEventListener('keyup', e => {
+    if (DEV_MODE && isDevConsoleOpen()) return;
+    keys[e.key.toLowerCase()] = false;
+});
 
 const PLAYER_SPEED = 6;
 const PLAYER_SPEED_Z = 4;
@@ -754,10 +1086,11 @@ function update() {
     // Movement — relative to camera direction
     let inputX = 0; // left/right (A/D)
     let inputZ = 0; // forward/back (W/S)
-    if (keys['a'] || keys['arrowleft'])  inputX = -1;
-    if (keys['d'] || keys['arrowright']) inputX = 1;
-    if (keys['w'] || keys['arrowup'])    inputZ = 1;
-    if (keys['s'] || keys['arrowdown'])  inputZ = -1;
+    const gameInputEnabled = !(DEV_MODE && isDevConsoleOpen());
+    if (gameInputEnabled && (keys['a'] || keys['arrowleft']))  inputX = -1;
+    if (gameInputEnabled && (keys['d'] || keys['arrowright'])) inputX = 1;
+    if (gameInputEnabled && (keys['w'] || keys['arrowup']))    inputZ = 1;
+    if (gameInputEnabled && (keys['s'] || keys['arrowdown']))  inputZ = -1;
 
     // Camera forward is from camera toward player (along the ground)
     const camFwdX = -Math.sin(camOrbitAngle);
@@ -819,9 +1152,11 @@ function update() {
 
     // Update blob shadow
     playerShadow.position.set(player.position.x, player.position.y + 0.02, player.position.z);
+    updateDebugReadout();
 
     // Procedural ground
     updateGroundChunks(player.position.x, player.position.z);
+    updatePlacementPreview();
 
     // Camera follow with orbit and zoom
     const orbitDist = CAM_DISTANCE * camZoom;
