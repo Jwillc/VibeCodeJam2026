@@ -6,10 +6,11 @@ import { detectActions } from './actionDetection.js';
 import { updateActionMenu, setActionCallback } from './actionMenu.js';
 import { setBuildMenuItems } from './buildMenu.js';
 import { canPlaceCollider, removeCollider, resolveCollision } from './collision.js';
-import { getHeight, getUphillFactor, isTooSteep, applyTerrainToChunk, TERRAIN_SEGS } from './terrain.js';
+import { getHeight, getUphillFactor, isTooSteep, applyTerrainToChunk, TERRAIN_SEGS, WATER_LEVEL } from './terrain.js';
 import { spawnChunkTrees, removeChunkTrees } from './trees.js';
 import { spawnChunkLakes, removeChunkLakes, isLake, setLakeAtmosphere, updateLakes } from './lakes.js';
 import { createVillageAsset, PLACEABLE_ITEMS, spawnVillageLayout, spawnVillagePlacement } from './village.js';
+import { spawnVillageVillagers } from './villagers.js';
 import { clearDevConsole, isDevConsoleOpen, logDevConsole, setDevConsoleCommandHandler } from './devConsole.js';
 import { DEV_MODE } from './devMode.js';
 import { clearSavedVillageLayout, loadVillageLayout, saveVillageLayout } from './villagePersistence.js';
@@ -941,6 +942,11 @@ villageEditState.assets = spawnVillageLayout(
     villageLayout.placements,
     (x, z) => GROUND_Y + getHeight(x, z)
 );
+const villageVillagers = spawnVillageVillagers(scene, villageLayout, {
+    resolveGroundY: (x, z) => GROUND_Y + getHeight(x, z),
+    resolveWaterY: () => GROUND_Y + WATER_LEVEL,
+    isLake,
+});
 
 // Blob shadow under the player (flat planes don't cast real shadows well)
 const shadowTex = (() => {
@@ -1286,6 +1292,7 @@ function update() {
     villageEditState.assets.forEach((asset) => {
         asset.userData?.update?.(asset, dt, time, camera);
     });
+    villageVillagers?.update(dt, time, camOrbitAngle);
 
     // Camera follow with orbit and zoom
     const orbitDist = CAM_DISTANCE * camZoom;
