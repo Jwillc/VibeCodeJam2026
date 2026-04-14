@@ -2,7 +2,17 @@ const PLAYER_RADIUS = 0.5;
 const colliders = []; // { x, z, radius }
 
 export function addCollider(x, z, radius) {
-    colliders.push({ x, z, radius });
+    const collider = { x, z, radius };
+    colliders.push(collider);
+    return collider;
+}
+
+export function removeCollider(target) {
+    if (!target) return;
+    const index = colliders.indexOf(target);
+    if (index >= 0) {
+        colliders.splice(index, 1);
+    }
 }
 
 export function canPlaceCollider(x, z, radius, padding = 0) {

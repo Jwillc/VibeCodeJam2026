@@ -5,14 +5,14 @@ import { updateSurvival, updateSurvivalHUD, hydratePlayer } from './survival.js'
 import { detectActions } from './actionDetection.js';
 import { updateActionMenu, setActionCallback } from './actionMenu.js';
 import { setBuildMenuItems } from './buildMenu.js';
-import { canPlaceCollider, resolveCollision } from './collision.js';
+import { canPlaceCollider, removeCollider, resolveCollision } from './collision.js';
 import { getHeight, getUphillFactor, isTooSteep, applyTerrainToChunk, TERRAIN_SEGS } from './terrain.js';
 import { spawnChunkTrees, removeChunkTrees } from './trees.js';
 import { spawnChunkLakes, removeChunkLakes, isLake, setLakeAtmosphere, updateLakes } from './lakes.js';
 import { createVillageAsset, PLACEABLE_ITEMS, spawnVillageLayout, spawnVillagePlacement } from './village.js';
 import { clearDevConsole, isDevConsoleOpen, logDevConsole, setDevConsoleCommandHandler } from './devConsole.js';
 import { DEV_MODE } from './devMode.js';
-import { loadVillageLayout, saveVillageLayout } from './villagePersistence.js';
+import { clearSavedVillageLayout, loadVillageLayout, saveVillageLayout } from './villagePersistence.js';
 
 const {
     layout: villageLayout,
@@ -68,6 +68,10 @@ const placementState = {
     hit: null,
     valid: false,
 };
+const villageEditState = {
+    assets: [],
+    selectedAsset: null,
+};
 
 const saveStatus = document.getElementById('save-status');
 const debugReadout = document.getElementById('debug-readout');
@@ -78,6 +82,95 @@ function setSaveStatus(text, isError = false) {
     if (!saveStatus) return;
     saveStatus.textContent = text;
     saveStatus.classList.toggle('error', isError);
+}
+
+function applyVillageSaveStatus(saveResult, successMessage) {
+    if (saveResult.ok) {
+        if (saveResult.storage === 'file') {
+            setSaveStatus(`${successMessage}: ${saveResult.fileName}`);
+        } else {
+            setSaveStatus(`${successMessage} locally for dev resets`);
+        }
+    } else if (saveResult.reason === 'local-storage-failed') {
+        setSaveStatus(`${successMessage}, but local save failed`, true);
+    } else {
+        setSaveStatus(`${successMessage}, but save failed`, true);
+    }
+}
+
+function clearVillageAssetSelection() {
+    villageEditState.selectedAsset = null;
+}
+
+function getVillageAssetLabel(asset) {
+    const type = asset?.userData?.placeableType;
+    if (type === 'tipi') return 'Tipi';
+    if (type === 'campfire') return 'Campfire';
+    return 'Structure';
+}
+
+function getVillageActions() {
+    const selectedAsset = villageEditState.selectedAsset;
+    if (!DEV_MODE || !selectedAsset) return null;
+
+    const label = getVillageAssetLabel(selectedAsset);
+    return [
+        { id: 'rotate-selected-village-asset', label: `Rotate ${label}` },
+        { id: 'delete-selected-village-asset', label: `Delete ${label}` },
+    ];
+}
+
+function getVillageAssetFromHit(object) {
+    let current = object;
+    while (current) {
+        if (current.userData?.isVillageAssetRoot) return current;
+        current = current.parent;
+    }
+    return object.userData?.villageAssetRoot ?? null;
+}
+
+function pickVillageAsset() {
+    if (!DEV_MODE || villageEditState.assets.length === 0) return null;
+    raycaster.setFromCamera(pointerNdc, camera);
+    const hits = raycaster.intersectObjects(villageEditState.assets, true);
+    for (const hit of hits) {
+        const asset = getVillageAssetFromHit(hit.object);
+        if (asset) return asset;
+    }
+    return null;
+}
+
+async function rotateSelectedVillageAsset() {
+    const asset = villageEditState.selectedAsset;
+    const placement = asset?.userData?.placementRef;
+    if (!asset || !placement) return;
+
+    const nextRotation = (asset.rotation.y + Math.PI / 4) % (Math.PI * 2);
+    asset.rotation.y = nextRotation;
+    placement.rotation = nextRotation;
+
+    const saveResult = await saveVillageLayout(villageLayout);
+    applyVillageSaveStatus(saveResult, `${getVillageAssetLabel(asset)} updated`);
+}
+
+async function deleteSelectedVillageAsset() {
+    const asset = villageEditState.selectedAsset;
+    const placement = asset?.userData?.placementRef;
+    if (!asset || !placement) return;
+
+    scene.remove(asset);
+    removeCollider(asset.userData?.colliderRef);
+    villageEditState.assets = villageEditState.assets.filter((entry) => entry !== asset);
+
+    const placementIndex = villageLayout.placements.indexOf(placement);
+    if (placementIndex >= 0) {
+        villageLayout.placements.splice(placementIndex, 1);
+    }
+
+    clearVillageAssetSelection();
+
+    const saveResult = await saveVillageLayout(villageLayout);
+    applyVillageSaveStatus(saveResult, `${getVillageAssetLabel(asset)} deleted`);
 }
 
 if (controlsHint) {
@@ -156,6 +249,7 @@ setDevConsoleCommandHandler(async (raw) => {
             'coords',
             'bake village',
             'print village',
+            'reset village',
             'clear',
         ];
     }
@@ -183,6 +277,17 @@ setDevConsoleCommandHandler(async (raw) => {
     if (command === 'bake village') {
         await bakeVillageLayout();
         return 'Bake complete.';
+    }
+
+    if (command === 'reset village') {
+        const result = clearSavedVillageLayout();
+        if (!result.ok) {
+            return 'Failed to clear dev local village autosave.';
+        }
+        setSaveStatus('Village source reset to baked layout');
+        logDevConsole('Cleared dev local village autosave. Reloading...');
+        window.location.reload();
+        return 'Reloading with baked village layout.';
     }
 
     return `Unknown command: ${raw}`;
@@ -246,6 +351,7 @@ function cancelPlacementMode() {
 
 function startPlacementMode(item) {
     cancelPlacementMode();
+    clearVillageAssetSelection();
     const preview = createBlueprintAsset(item.id);
     if (!preview) return;
     placementState.active = true;
@@ -309,20 +415,13 @@ async function placeSelectedAsset() {
     };
 
     villageLayout.placements.push(placement);
-    spawnVillagePlacement(scene, placement, (x, z) => GROUND_Y + getHeight(x, z));
+    const asset = spawnVillagePlacement(scene, placement, (x, z) => GROUND_Y + getHeight(x, z));
+    if (asset) {
+        villageEditState.assets.push(asset);
+    }
 
     const saveResult = await saveVillageLayout(villageLayout);
-    if (saveResult.ok) {
-        if (saveResult.storage === 'file') {
-            setSaveStatus(`Village saved: ${saveResult.fileName}`);
-        } else {
-            setSaveStatus('Village saved locally for dev resets');
-        }
-    } else if (saveResult.reason === 'local-storage-failed') {
-        setSaveStatus('Village placement added, but local save failed', true);
-    } else {
-        setSaveStatus('Village placement added, but save failed', true);
-    }
+    applyVillageSaveStatus(saveResult, 'Village saved');
 }
 
 // ── Mouse orbit controls ──
@@ -342,6 +441,16 @@ renderer.domElement.addEventListener('mousedown', async (e) => {
             e.preventDefault();
             return;
         }
+    }
+
+    if (DEV_MODE && e.button === 0) {
+        const selectedAsset = pickVillageAsset();
+        if (selectedAsset) {
+            villageEditState.selectedAsset = selectedAsset;
+            e.preventDefault();
+            return;
+        }
+        clearVillageAssetSelection();
     }
 
     if (e.button === 2 || e.button === 0) {
@@ -366,6 +475,7 @@ window.addEventListener('buildmenuchange', (e) => {
     if (!DEV_MODE) return;
     if (e.detail?.open) {
         cancelPlacementMode();
+        clearVillageAssetSelection();
     }
 });
 
@@ -826,7 +936,11 @@ player.position.set(
     villageLayout.center?.z ?? 65.65
 );
 setBuildMenuItems(PLACEABLE_ITEMS);
-spawnVillageLayout(scene, villageLayout.placements, (x, z) => GROUND_Y + getHeight(x, z));
+villageEditState.assets = spawnVillageLayout(
+    scene,
+    villageLayout.placements,
+    (x, z) => GROUND_Y + getHeight(x, z)
+);
 
 // Blob shadow under the player (flat planes don't cast real shadows well)
 const shadowTex = (() => {
@@ -1070,7 +1184,19 @@ function updateDayNight(elapsed) {
 
 // ── Action callbacks ──────────────────────────────────────────────
 setActionCallback((id) => {
-    if (id === 'drink') hydratePlayer(25);
+    if (id === 'drink') {
+        hydratePlayer(25);
+        return;
+    }
+
+    if (id === 'rotate-selected-village-asset') {
+        rotateSelectedVillageAsset();
+        return;
+    }
+
+    if (id === 'delete-selected-village-asset') {
+        deleteSelectedVillageAsset();
+    }
 });
 
 // ── Main loop ──────────────────────────────────────────────────────
@@ -1143,7 +1269,7 @@ function update() {
     player.position.y = GROUND_Y + getHeight(resolved.x, resolved.z);
 
     // Action detection
-    updateActionMenu(detectActions(player.position.x, player.position.z));
+    updateActionMenu(getVillageActions() ?? detectActions(player.position.x, player.position.z));
 
     // Rotate player model to always face away from camera
     player.rotation.y = camOrbitAngle;
@@ -1157,6 +1283,9 @@ function update() {
     // Procedural ground
     updateGroundChunks(player.position.x, player.position.z);
     updatePlacementPreview();
+    villageEditState.assets.forEach((asset) => {
+        asset.userData?.update?.(asset, dt, time, camera);
+    });
 
     // Camera follow with orbit and zoom
     const orbitDist = CAM_DISTANCE * camZoom;

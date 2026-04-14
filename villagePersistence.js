@@ -1,6 +1,42 @@
 const DEFAULT_VILLAGE_LAYOUT = {
     center: { x: 90, y: 0.67, z: 65.65 },
-    placements: [],
+    placements: [
+        {
+            type: 'tipi',
+            x: 85.68971709077718,
+            y: 0.8571086622984514,
+            z: 54.355796121964126,
+            rotation: 0,
+        },
+        {
+            type: 'tipi',
+            x: 82.41165576911122,
+            y: 0.5586744239573438,
+            z: 62.98055947154461,
+            rotation: 0.6780000000000004,
+        },
+        {
+            type: 'tipi',
+            x: 94.66191487348998,
+            y: 0.7981478961453794,
+            z: 55.85987599545456,
+            rotation: 5.39038898038469,
+        },
+        {
+            type: 'tipi',
+            x: 85.17436683167047,
+            y: 0.5146250597091262,
+            z: 71.63258008511211,
+            rotation: 1.6260000000000046,
+        },
+        {
+            type: 'campfire',
+            x: 92.79518968860664,
+            y: 0.6573096315316644,
+            z: 64.7226685545564,
+            rotation: 0.9420000000000007,
+        },
+    ],
 };
 
 const DB_NAME = 'stick-shooter-db';
@@ -13,7 +49,7 @@ let cachedHandle = null;
 function cloneDefaultLayout() {
     return {
         center: { ...DEFAULT_VILLAGE_LAYOUT.center },
-        placements: [],
+        placements: DEFAULT_VILLAGE_LAYOUT.placements.map((placement) => ({ ...placement })),
     };
 }
 
@@ -216,5 +252,14 @@ export async function saveVillageLayout(layout) {
             fallbackReason: 'write-failed',
             error,
         };
+    }
+}
+
+export function clearSavedVillageLayout() {
+    try {
+        window.localStorage.removeItem(LOCAL_STORAGE_KEY);
+        return { ok: true };
+    } catch (error) {
+        return { ok: false, error };
     }
 }
